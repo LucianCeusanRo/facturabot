@@ -224,7 +224,7 @@ export class SyncEngine {
       }
       this.d.onChange?.();
     }
-    if (sent) this.d.notify?.('FacturaBot', `${sent} ${sent === 1 ? 'factură trimisă' : 'facturi trimise'} la contabilă ✅`);
+    if (sent) this.d.notify?.('FacturaBot', `${sent} ${sent === 1 ? 'factură trimisă' : 'facturi trimise'} la contabilă`);
   }
 
   async approve(id: number) {

@@ -14,7 +14,7 @@ export function makePkce() {
 
 const DONE_HTML = (ok: boolean, msg: string) => `<!doctype html><html lang="ro"><meta charset="utf-8"><title>FacturaBot</title>
 <body style="font-family:Segoe UI,system-ui,sans-serif;background:#0b1020;color:#e8ecf8;display:grid;place-items:center;height:100vh;margin:0">
-<div style="text-align:center"><div style="font-size:56px">${ok ? '✅' : '⚠️'}</div><h2>${msg}</h2><p style="opacity:.7">Poți închide această filă și reveni în FacturaBot.</p></div></body></html>`;
+<div style="text-align:center"><div style="font-size:56px">${ok ? 'OK' : '!'}</div><h2>${msg}</h2><p style="opacity:.7">Poți închide această filă și reveni în FacturaBot.</p></div></body></html>`;
 
 /**
  * Flux OAuth „loopback” pentru aplicații desktop (RFC 8252): pornim un server local pe 127.0.0.1,

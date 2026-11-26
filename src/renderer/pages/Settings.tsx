@@ -4,7 +4,7 @@ import { api, fmtDate } from '../api';
 import type { Store } from '../App';
 import { Icon } from '../components/Icon';
 import { WhatsAppSetup } from '../components/WhatsAppSetup';
-import { Card, Field, Toggle } from '../components/ui';
+import { Field, Toggle } from '../components/ui';
 import { AccountantForm, FgoForm } from './Onboarding';
 
 export function EmailConnect({ store }: { store: Store }) {
@@ -134,68 +134,104 @@ export function SettingsPage({ store }: { store: Store }) {
           <p className="lead">Surse, contabilă, trimitere și automatizare.</p>
         </div>
       </header>
-      <div className="settings-grid">
-        <Card title="Surse de facturi" icon="mail">
-          <EmailConnect store={store} />
-          <div className="sep" />
-          <h4 className="sub">FGO</h4>
-          <FgoForm store={store} />
-        </Card>
-        <Card title="Contabila" icon="user">
-          <AccountantForm store={store} />
-          <div className="sep" />
-          <Field label="Emailul pleacă prin">
-            <div className="seg">
-              {(['gmail', 'outlook', 'smtp'] as const).map((p) => (
-                <button key={p} className={settings.delivery.emailProvider === p ? 'on' : ''} onClick={() => save({ delivery: { emailProvider: p } })}>
-                  {p === 'gmail' ? 'Gmail' : p === 'outlook' ? 'Outlook' : 'SMTP'}
+      <div className="settings-sheet">
+        <section className="set-row">
+          <div className="set-label">
+            <h2>Surse de facturi</h2>
+            <p>Gmail, Outlook și, opțional, FGO. Detectarea e pe reguli — fără AI, 100% local.</p>
+          </div>
+          <div className="set-panel stack">
+            <EmailConnect store={store} />
+            <div className="sep" />
+            <h4 className="sub">FGO (API v2)</h4>
+            <FgoForm store={store} />
+          </div>
+        </section>
+        <section className="set-row">
+          <div className="set-label">
+            <h2>Contabila</h2>
+            <p>Cui ajung facturile și prin ce adresă de expediere pleacă emailul de rezervă.</p>
+          </div>
+          <div className="set-panel stack">
+            <AccountantForm store={store} />
+            <Field label="Emailul pleacă prin">
+              <div className="seg">
+                {(['gmail', 'outlook', 'smtp'] as const).map((p) => (
+                  <button key={p} className={settings.delivery.emailProvider === p ? 'on' : ''} onClick={() => save({ delivery: { emailProvider: p } })}>
+                    {p === 'gmail' ? 'Gmail' : p === 'outlook' ? 'Outlook' : 'SMTP'}
+                  </button>
+                ))}
+              </div>
+            </Field>
+            {settings.delivery.emailProvider === 'smtp' && <SmtpForm store={store} />}
+          </div>
+        </section>
+        <section className="set-row">
+          <div className="set-label">
+            <h2>Trimitere pe WhatsApp</h2>
+            <p>WhatsApp Web, API-ul oficial sau doar email. Poți schimba oricând.</p>
+          </div>
+          <div className="set-panel">
+            <WhatsAppSetup store={store} compact />
+          </div>
+        </section>
+        <section className="set-row">
+          <div className="set-label">
+            <h2>Automatizare</h2>
+            <p>Cât de des verifică FacturaBot și dacă vrei confirmare înainte de trimitere.</p>
+          </div>
+          <div className="set-panel stack">
+            <Field label={`Verifică facturi noi la fiecare ${settings.pollMinutes} minute`}>
+              <input type="range" min={10} max={60} step={5} value={settings.pollMinutes} onChange={(e) => save({ pollMinutes: Number(e.target.value) })} />
+            </Field>
+            <Toggle checked={settings.confirmBeforeSend} onChange={(v) => save({ confirmBeforeSend: v })} label="Confirm înainte de trimitere" hint="Primești o notificare și aprobi fiecare factură din „Facturi”." />
+            <Toggle checked={settings.autostart} onChange={(v) => save({ autostart: v })} label="Pornește odată cu Windows" hint="Rulează discret în tray, lângă ceas." />
+            <Field label="La prima sincronizare, caută în ultimele">
+              <select value={settings.lookbackDays} onChange={(e) => save({ lookbackDays: Number(e.target.value) })}>
+                {[7, 14, 30, 60, 90].map((d) => (
+                  <option key={d} value={d}>
+                    {d} zile
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        </section>
+        <section className="set-row">
+          <div className="set-label">
+            <h2>Detectare</h2>
+            <p>Reguli locale: cuvinte cheie, liste de expeditori și text extras din PDF. Fără model, fără cheie API de AI.</p>
+          </div>
+          <div className="set-panel">
+            <AdvancedCard store={store} />
+          </div>
+        </section>
+        <section className="set-row">
+          <div className="set-label">
+            <h2>Aspect și jurnal</h2>
+            <p>Temă deschisă, închisă sau cea a sistemului. Jurnalul rămâne pe acest calculator.</p>
+          </div>
+          <div className="set-panel stack">
+            <div className="theme-picker">
+              {themes.map(([id, label, icon]) => (
+                <button key={id} className={settings.theme === id ? 'on' : ''} onClick={() => save({ theme: id })}>
+                  <Icon name={icon} size={20} />
+                  {label}
                 </button>
               ))}
             </div>
-          </Field>
-          {settings.delivery.emailProvider === 'smtp' && <SmtpForm store={store} />}
-        </Card>
-        <Card title="Trimitere pe WhatsApp" icon="whatsapp" className="span2">
-          <WhatsAppSetup store={store} compact />
-        </Card>
-        <Card title="Automatizare" icon="zap">
-          <Field label={`Verifică facturi noi la fiecare ${settings.pollMinutes} minute`}>
-            <input type="range" min={10} max={60} step={5} value={settings.pollMinutes} onChange={(e) => save({ pollMinutes: Number(e.target.value) })} />
-          </Field>
-          <Toggle checked={settings.confirmBeforeSend} onChange={(v) => save({ confirmBeforeSend: v })} label="Confirm înainte de trimitere" hint="Primești o notificare și aprobi fiecare factură din „Acasă”." />
-          <Toggle checked={settings.autostart} onChange={(v) => save({ autostart: v })} label="Pornește odată cu Windows" hint="Rulează discret în tray, lângă ceas." />
-          <Field label="La prima sincronizare, caută în ultimele">
-            <select value={settings.lookbackDays} onChange={(e) => save({ lookbackDays: Number(e.target.value) })}>
-              {[7, 14, 30, 60, 90].map((d) => (
-                <option key={d} value={d}>
-                  {d} zile
-                </option>
+            <h4 className="sub">Jurnal</h4>
+            <div className="log">
+              {logs.length === 0 && <div className="hint">Nimic încă.</div>}
+              {logs.map((l) => (
+                <div key={l.id} className={`log-line ${l.level}`}>
+                  <span className="log-ts">{fmtDate(l.ts, true)}</span>
+                  <span>{l.message}</span>
+                </div>
               ))}
-            </select>
-          </Field>
-        </Card>
-        <AdvancedCard store={store} />
-        <Card title="Aspect" icon="sun">
-          <div className="theme-picker">
-            {themes.map(([id, label, icon]) => (
-              <button key={id} className={settings.theme === id ? 'on' : ''} onClick={() => save({ theme: id })}>
-                <Icon name={icon} size={20} />
-                {label}
-              </button>
-            ))}
+            </div>
           </div>
-          <div className="sep" />
-          <h4 className="sub">Jurnal</h4>
-          <div className="log">
-            {logs.length === 0 && <div className="hint">Nimic încă.</div>}
-            {logs.map((l) => (
-              <div key={l.id} className={`log-line ${l.level}`}>
-                <span className="log-ts">{fmtDate(l.ts, true)}</span>
-                <span>{l.message}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
+        </section>
       </div>
     </div>
   );
@@ -263,8 +299,8 @@ function AdvancedCard({ store }: { store: Store }) {
   const d = settings.delivery;
   const num = (v: string) => Number(v.replace(',', '.'));
   return (
-    <Card title="Avansat" icon="key">
-      <p className="hint">Reguli de detectare și reîncercare. Valorile implicite merg pentru majoritatea firmelor.</p>
+    <div className="stack">
+      <p className="hint">Valorile implicite merg pentru majoritatea firmelor. Schimbările se aplică imediat, fără cloud.</p>
       <Field label="Furnizori proprii (adrese sau domenii)" hint="Emailurile de la ei sunt tratate mereu ca facturi. Ex.: contabilitate@furnizor.ro, utilitati.ro">
         <ListInput value={det.extraSenders} onSave={(v) => save({ detection: { extraSenders: v } })} placeholder="furnizor.ro, facturi@firma.ro" />
       </Field>
@@ -295,6 +331,6 @@ function AdvancedCard({ store }: { store: Store }) {
       <Field label="Filtru Gmail suplimentar (opțional)" hint="Sintaxă Gmail, ex.: -from:noreply@exemplu.ro label:facturi">
         <input value={settings.sources.gmail.extraQuery ?? ''} onChange={(e) => save({ sources: { gmail: { extraQuery: e.target.value } } })} />
       </Field>
-    </Card>
+    </div>
   );
 }

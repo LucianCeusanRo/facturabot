@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classify, extractSeriesNumber, matchBiller, sanitizeFileName } from '../src/main/sources/classify';
+import { classify, extractPdfText, extractSeriesNumber, matchBiller, sanitizeFileName } from '../src/main/sources/classify';
 import { buildGmailQuery } from '../src/main/sources/gmail';
 
 describe('classify', () => {
@@ -84,5 +84,20 @@ describe('reguli de detectare configurabile', () => {
     const inp = { from: 'x@y.ro', subject: 'Factura', fileName: 'scan.pdf' };
     expect(classify(inp, { minScore: 3 }).isInvoice).toBe(true);
     expect(classify(inp, { minScore: 5 }).isInvoice).toBe(false);
+  });
+});
+
+describe('extractPdfText (reguli, fără AI)', () => {
+  it('citește șiruri literale din PDF și ajută clasificarea', () => {
+    const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n(Factura fiscala nr. ABC 778899)\nendobj\n', 'latin1');
+    const text = extractPdfText(pdf);
+    expect(text).toMatch(/Factura fiscala nr\. ABC 778899/);
+    const r = classify({ from: 'x@y.ro', subject: 'Document', fileName: 'scan.pdf', pdfText: text });
+    expect(r.isInvoice).toBe(true);
+    expect(r.reasons.join(' ')).toMatch(/PDF/);
+    expect(extractSeriesNumber(text)).toMatch(/778899/);
+  });
+  it('întoarce gol pe non-PDF', () => {
+    expect(extractPdfText(Buffer.from('not a pdf Factura'))).toBe('');
   });
 });

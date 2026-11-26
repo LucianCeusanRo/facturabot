@@ -5,3 +5,6 @@ release
 .env
 coverage
 *.tmp
+
+.taste-skill/
+screenshots-before/

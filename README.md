@@ -2,7 +2,11 @@
 
 **🇷🇴 Facturile ajung singure la contabilă.** FacturaBot este o aplicație Windows care stă discret lângă ceas (în tray), găsește facturile care îți intră pe email (Gmail / Outlook) și în FGO, și le trimite automat contabilei pe **WhatsApp** sau pe **email**.
 
+Detectarea facturilor este **fără AI, 100% local, pe reguli** (cuvinte cheie, liste de expeditori, nume de fișier și text extras din PDF). Nu e nevoie de nicio cheie API de model.
+
 **🇬🇧 Invoices that deliver themselves to your accountant.** FacturaBot is a Windows tray app that finds incoming invoices in Gmail / Outlook / FGO and forwards them automatically to your accountant via **WhatsApp** or **email**.
+
+Invoice detection is **rule-based, fully local, with no AI** (keywords, sender lists, filename and PDF-text heuristics). No model API key is required.
 
 ![Acasă](screenshots/dashboard-dark.png)
 
@@ -54,7 +58,9 @@
 6. Copiază **Application (client) ID** în FacturaBot. Pentru Outlook nu ai nevoie de client secret.
 
 ### FGO
-Cheia API o găsești în FGO la **Setări → Utilizatori → cheie API** (cere-o de la FGO dacă nu apare). Ai nevoie și de CUI-ul firmei, fără „RO”. Documentația API e la <https://api.fgo.ro/docs/>, iar FacturaBot folosește `GET /v2/facturi-furnizori` și `GET /v2/facturi` cu antetele `Authorization: Bearer` și `Fgo-Cod-Unic`.
+Folosim **cheia API v2**, cu prefixul `fgo_api_v2…`. O creezi în FGO la **eCommerce → API** (nu mai e la Setări → Utilizatori). Ai nevoie și de CUI-ul firmei, fără „RO”, pe care îl trimit ca antet `Fgo-Cod-Unic`.
+
+În aplicație, butonul **Testează conexiunea** apelează `GET /v2/identitate` (nu cere un drept funcțional) și verifică dacă cheia are `furnizori:citire` și, dacă ai bifat facturile emise, `facturi:citire`. Documentația oficială: [autentificare](https://api.fgo.ro/docs/ghiduri/autentificare) și [API v2](https://api.fgo.ro/docs/). FacturaBot folosește `GET /v2/facturi-furnizori`, `GET /v2/facturi` și `POST /v2/facturi/{serie}/{numar}/genereaza-link-de-descarcare`, cu paginare prin cursor, pauză de 1 s între operații și erori `application/problem+json`.
 
 ### WhatsApp Business Cloud API (varianta oficială)
 1. Intră pe <https://developers.facebook.com/>, creează o aplicație de tip **Business** și adaugă produsul **WhatsApp**.
@@ -73,12 +79,12 @@ Cheia API o găsești în FGO la **Setări → Utilizatori → cheie API** (cere
 |---|---|---|
 | Interval verificare | 20 min (5–240) | Setări → Automatizare / `FACTURABOT_POLL_MINUTES` |
 | Zile căutate la prima sincronizare | 30 | Setări → Automatizare / `FACTURABOT_LOOKBACK_DAYS` |
-| Furnizori proprii, expeditori ignorați, cuvinte cheie extra | – | Setări → Avansat |
-| Sensibilitate detectare (scor minim) | 3 | Setări → Avansat |
-| Mărime maximă atașament | 25 MB | Setări → Avansat |
-| Încercări de trimitere / fereastră de reîncercare | 5 / 7 zile | Setări → Avansat |
-| Pauză între mesaje WhatsApp | 4 s | Setări → Avansat |
-| Filtru Gmail suplimentar | – | Setări → Avansat |
+| Furnizori proprii, expeditori ignorați, cuvinte cheie extra | – | Setări → Detectare |
+| Sensibilitate detectare (scor minim) | 3 | Setări → Detectare |
+| Mărime maximă atașament | 25 MB | Setări → Detectare |
+| Încercări de trimitere / fereastră de reîncercare | 5 / 7 zile | Setări → Detectare |
+| Pauză între mesaje WhatsApp | 4 s | Setări → Detectare |
+| Filtru Gmail suplimentar | – | Setări → Detectare |
 | URL API FGO | `https://api.fgo.ro` | `FACTURABOT_FGO_API_BASE` |
 | Versiune Graph API WhatsApp | `v21.0` | `FACTURABOT_WA_API_VERSION` |
 | Folder date | `%APPDATA%\FacturaBot` | `FACTURABOT_DATA_DIR` |

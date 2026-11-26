@@ -1,6 +1,6 @@
 import { fetchWithRetry } from '../http.js';
 import { microsoftAccessToken } from '../oauth/microsoft.js';
-import { classify, extractSeriesNumber, sanitizeFileName } from './classify.js';
+import { classify, extractPdfText, extractSeriesNumber, sanitizeFileName } from './classify.js';
 import type { FoundDocument, InvoiceSource, SourceContext } from './types.js';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0/me';
@@ -40,14 +40,18 @@ export const outlookSource: InvoiceSource = {
           }
           const full: any = await get(`${GRAPH}/messages/${m.id}/attachments/${a.id}`);
           if (!full.contentBytes) continue;
+          const data = Buffer.from(full.contentBytes, 'base64');
+          const pdfText = extractPdfText(data);
+          const c2 = classify({ from, subject: m.subject ?? '', fileName: a.name, mimeType: a.contentType, bodySnippet: m.bodyPreview, pdfText }, det);
+          if (!c2.isInvoice) continue;
           docs.push({
             externalId,
-            vendor: c.biller?.name ?? m.from?.emailAddress?.name ?? null,
+            vendor: c2.biller?.name ?? m.from?.emailAddress?.name ?? null,
             subject: m.subject,
             fileName: sanitizeFileName(a.name),
-            data: Buffer.from(full.contentBytes, 'base64'),
+            data,
             mimeType: 'application/pdf',
-            seriesNumber: extractSeriesNumber(a.name, m.subject),
+            seriesNumber: extractSeriesNumber(a.name, m.subject, pdfText),
             invoiceDate: String(m.receivedDateTime).slice(0, 10),
           });
         }

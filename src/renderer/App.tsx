@@ -84,7 +84,7 @@ export function App() {
     );
 
   const nav: { id: Page; label: string; icon: string }[] = [
-    { id: 'dashboard', label: 'Acasă', icon: 'home' },
+    { id: 'dashboard', label: 'Facturi', icon: 'home' },
     { id: 'history', label: 'Istoric', icon: 'history' },
     { id: 'settings', label: 'Setări', icon: 'settings' },
   ];
@@ -99,7 +99,7 @@ export function App() {
           </div>
           <div>
             <div className="brand-name">FacturaBot</div>
-            <div className="brand-sub">facturi → contabilă</div>
+            <div className="brand-sub">către contabilă</div>
           </div>
         </div>
         <nav>

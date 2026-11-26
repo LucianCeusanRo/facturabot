@@ -90,6 +90,8 @@ export interface ClassifyInput {
   fileName?: string;
   mimeType?: string;
   bodySnippet?: string;
+  /** Text extras deterministic din PDF (fără OCR/AI), dacă e disponibil. */
+  pdfText?: string;
 }
 
 export interface ClassifyOptions {
@@ -117,6 +119,7 @@ export function classify(input: ClassifyInput, opts: ClassifyOptions = {}): Clas
   const subj = norm(input.subject || '');
   const file = norm(input.fileName || '');
   const body = norm(input.bodySnippet || '');
+  const pdf = norm(input.pdfText || '');
   const biller = matchBiller(input.from || '', opts.extraSenders);
   const isPdf = (input.mimeType || '').includes('pdf') || file.endsWith('.pdf');
 
@@ -140,6 +143,10 @@ export function classify(input: ClassifyInput, opts: ClassifyOptions = {}): Clas
   if (body && hit(body)) {
     score += 1;
     reasons.push('corp email cu cuvinte cheie');
+  }
+  if (pdf && hit(pdf)) {
+    score += 2;
+    reasons.push('text în PDF cu „factură/invoice/receipt”');
   }
   if (isPdf) score += 1;
   if (NEGATIVE.some((k) => subj.includes(norm(k)))) {
@@ -194,4 +201,45 @@ export function sanitizeFileName(name: string, fallback = 'factura.pdf'): string
   if (stem.length + ext.length > 150) stem = stem.slice(0, 150 - ext.length).trim();
   n = stem + ext;
   return n && n !== ext ? n : fallback;
+}
+
+
+/**
+ * Extrage text dintr-un PDF prin reguli (șiruri literale PDF, fără OCR și fără model).
+ * Funcționează pe PDF-uri cu text necomprimat; pe scanări întoarce șir gol — atunci rămân
+ * cuvintele din subiect/nume fișier/expeditor.
+ */
+export function extractPdfText(data: Buffer, maxChars = 80_000): string {
+  if (!data || data.length < 8) return '';
+  const head = data.subarray(0, 8).toString('latin1');
+  if (!head.startsWith('%PDF')) return '';
+  const raw = data.toString('latin1').slice(0, Math.min(data.length, 2_000_000));
+  const out: string[] = [];
+  const push = (t: string) => {
+    // eslint-disable-next-line no-control-regex
+    const s = t.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (s.length >= 3) out.push(s);
+  };
+  // Șiruri între paranteze: (Factura nr. 12)
+  const lit = /\((?:\\.|[^\\)]){3,400}\)/g;
+  for (const m of raw.matchAll(lit)) {
+    const esc: Record<string, string> = { n: '\n', r: '\r', t: '\t', b: ' ', '(': '(', ')': ')', '\\': '\\' };
+    const inner = m[0].slice(1, -1).replace(/\\([nrtb()\\])/g, (_, c: string) => esc[c] ?? c);
+    // Ignoră escape-uri octale lungi fără litere (font encoding)
+    if (/[A-Za-zĂÂÎȘȚăâîșț]{3,}/.test(inner)) push(inner);
+    if (out.join(' ').length >= maxChars) break;
+  }
+  // Hex UTF-16BE: <FEFF00460061...>
+  const hex = /<((?:FEFF|feff)?[0-9A-Fa-f]{8,800})>/g;
+  for (const m of raw.matchAll(hex)) {
+    const h = m[1];
+    if (h.length % 2) continue;
+    try {
+      const buf = Buffer.from(h, 'hex');
+      const text = buf[0] === 0xfe && buf[1] === 0xff ? Buffer.from(buf.subarray(2)).swap16().toString('utf16le') : buf.toString('latin1');
+      if (/[A-Za-zĂÂÎȘȚăâîșț]{3,}/.test(text)) push(text);
+    } catch { /* ignori */ }
+    if (out.join(' ').length >= maxChars) break;
+  }
+  return out.join(' ').slice(0, maxChars);
 }

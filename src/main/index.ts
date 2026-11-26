@@ -12,7 +12,7 @@ import { deliver } from './delivery/dispatcher.js';
 import { connectGoogle } from './oauth/google.js';
 import { connectMicrosoft } from './oauth/microsoft.js';
 import { SecretStore } from './secrets.js';
-import { FgoClient } from './sources/fgo.js';
+import { FgoClient, fgoNeededRights, isValidFgoApiKey, normalizeFgoApiKey } from './sources/fgo.js';
 import { SyncEngine } from './sync.js';
 import { seedDemo } from './demo.js';
 
@@ -131,15 +131,13 @@ async function main() {
     return settings.get();
   });
   handle('fgo:test', async () => {
-    try {
-      const s = settings.get().sources.fgo;
-      const key = secrets.get('fgo.apiKey');
-      if (!key || !s.codUnic) throw new Error('Completează cheia API și CUI-ul');
-      const j = await new FgoClient(key, s.codUnic, s.apiBase).identitate();
-      return { ok: true, info: `Drepturi: ${(j.data?.drepturi ?? []).join(', ') || '—'}` };
-    } catch (e) {
-      return { ok: false, error: (e as Error).message };
-    }
+    const s = settings.get().sources.fgo;
+    const key = secrets.get('fgo.apiKey');
+    if (!s.codUnic) return { ok: false, error: 'Completează CUI-ul firmei (doar cifrele, fără RO).' };
+    if (!key) return { ok: false, error: 'Lipsește cheia API FGO v2 (începe cu fgo_api_v2).' };
+    if (!isValidFgoApiKey(key)) return { ok: false, error: 'Cheia trebuie să înceapă cu fgo_api_v2. Genereaz-o în FGO → eCommerce → API (nu mai folosi cheile v1).' };
+    const r = await new FgoClient(normalizeFgoApiKey(key), s.codUnic, s.apiBase).probe(fgoNeededRights(s));
+    return r;
   });
   handle('wa:start', () => (DEMO ? waWeb.simulateQr() : waWeb.start()));
   handle('wa:logout', () => waWeb.logout());
@@ -147,7 +145,7 @@ async function main() {
   handle('delivery:test', async () => {
     try {
       const pdf = await htmlToPdf(
-        `<div style="font:16px Segoe UI,sans-serif;padding:40px"><h1>Test FacturaBot ✅</h1><p>Dacă primiți acest document, conexiunea funcționează.</p><p>${new Date().toLocaleString('ro-RO')}</p></div>`,
+        `<div style="font:16px Segoe UI,sans-serif;padding:40px"><h1>Test FacturaBot</h1><p>Dacă primiți acest document, conexiunea funcționează.</p><p>${new Date().toLocaleString('ro-RO')}</p></div>`,
       );
       const s = settings.get();
       if (s.delivery.whatsappMode === 'cloud') {
@@ -212,18 +210,23 @@ function applyAutostart(s: Settings) {
   }
 }
 
+function titleBarOverlay() {
+  const dark = nativeTheme.shouldUseDarkColors;
+  return { color: dark ? '#000000' : '#f2f4f7', symbolColor: dark ? '#e8e8e8' : '#0a0a0a', height: 32 };
+}
+
 function createWindow(hidden: boolean) {
   win = new BrowserWindow({
-    width: 1180,
-    height: 780,
-    minWidth: 940,
+    width: 1280,
+    height: 800,
+    minWidth: 980,
     minHeight: 640,
     show: !hidden,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0b1020' : '#f5f7fb',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#000000' : '#f2f4f7',
     title: 'FacturaBot',
     icon: assetPath('icon.png'),
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#00000000', symbolColor: nativeTheme.shouldUseDarkColors ? '#c9d2ea' : '#334', height: 44 },
+    titleBarOverlay: titleBarOverlay(),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
@@ -233,7 +236,8 @@ function createWindow(hidden: boolean) {
   });
   nativeTheme.on('updated', () => {
     try {
-      win?.setTitleBarOverlay({ color: '#00000000', symbolColor: nativeTheme.shouldUseDarkColors ? '#c9d2ea' : '#334', height: 44 });
+      win?.setTitleBarOverlay(titleBarOverlay());
+      win?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#000000' : '#f2f4f7');
     } catch {
       /* nu e suportat pe toate platformele */
     }

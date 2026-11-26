@@ -7,6 +7,8 @@ export interface RetryOptions {
   baseDelayMs?: number;
   maxDelayMs?: number;
   sleep?: (ms: number) => Promise<void>;
+  /** Pauză minimă între paginile FGO (implicit 1000 ms, conform limitei oficiale). */
+  pageGapMs?: number;
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));

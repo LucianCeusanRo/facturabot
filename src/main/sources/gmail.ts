@@ -1,6 +1,6 @@
 import { fetchWithRetry } from '../http.js';
 import { googleAccessToken } from '../oauth/google.js';
-import { classify, extractSeriesNumber, KNOWN_BILLERS, sanitizeFileName } from './classify.js';
+import { classify, extractPdfText, extractSeriesNumber, KNOWN_BILLERS, sanitizeFileName } from './classify.js';
 import type { FoundDocument, InvoiceSource, SourceContext } from './types.js';
 
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
@@ -87,14 +87,17 @@ export const gmailSource: InvoiceSource = {
             data = b64urlToBuf(a.data);
           } else if (p.body?.data) data = b64urlToBuf(p.body.data);
           else continue;
+          const pdfText = extractPdfText(data);
+          const c2 = classify({ from, subject, fileName: p.filename, mimeType: p.mimeType, bodySnippet: msg.snippet, pdfText }, det);
+          if (!c2.isInvoice) continue;
           docs.push({
             externalId,
-            vendor: c.biller?.name ?? from.replace(/<.*>/, '').replace(/"/g, '').trim(),
+            vendor: c2.biller?.name ?? from.replace(/<.*>/, '').replace(/"/g, '').trim(),
             subject,
             fileName: sanitizeFileName(p.filename!),
             data,
             mimeType: 'application/pdf',
-            seriesNumber: extractSeriesNumber(p.filename, subject),
+            seriesNumber: extractSeriesNumber(p.filename, subject, pdfText),
             invoiceDate: date.toISOString().slice(0, 10),
           });
         }

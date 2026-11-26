@@ -59,7 +59,7 @@ export function WhatsAppSetup({ store, compact }: { store: Store; compact?: bool
     setTesting(true);
     const r = await api.testDelivery();
     setTesting(false);
-    toast(r.ok ? `Mesaj de test trimis (${r.channel}) ✅` : `Testul a eșuat: ${r.error}`, r.ok ? 'ok' : 'err');
+    toast(r.ok ? `Mesaj de test trimis (${r.channel}).` : `Testul a eșuat: ${r.error}`, r.ok ? 'ok' : 'err');
   };
 
   return (

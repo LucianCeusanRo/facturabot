@@ -28,7 +28,7 @@ export function Onboarding({ store, initialStep, onDone }: { store: Store; initi
   const finish = async () => {
     await save({ onboardingDone: true });
     await api.syncNow();
-    toast('Gata! FacturaBot rulează acum în fundal 🎉');
+    toast('Gata. FacturaBot rulează acum în fundal.');
     onDone();
   };
 
@@ -131,10 +131,20 @@ export function FgoForm({ store }: { store: Store }) {
   const [key, setKey] = useState('');
   const [hasKey, setHasKey] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [keyError, setKeyError] = useState('');
   useEffect(() => {
     api.hasSecret('fgo.apiKey').then(setHasKey);
   }, []);
+  const looksValid = (raw: string) => {
+    const k = raw.trim().replace(/^Bearer\s+/i, '');
+    return k.startsWith('fgo_api_v2') && k.length > 'fgo_api_v2'.length;
+  };
   const test = async () => {
+    if (key.trim() && !looksValid(key)) {
+      setKeyError('Cheia trebuie să înceapă cu fgo_api_v2… (API FGO v2, lansată recent).');
+      return;
+    }
+    setKeyError('');
     setBusy(true);
     if (key.trim()) {
       await api.setSecret('fgo.apiKey', key.trim());
@@ -145,24 +155,44 @@ export function FgoForm({ store }: { store: Store }) {
     setBusy(false);
     if (r.ok) {
       await save({ sources: { fgo: { enabled: true } } });
-      toast(`FGO conectat. ${r.info ?? ''}`);
+      toast(r.info ? `FGO conectat. ${r.info}` : 'FGO conectat.');
     } else toast(`FGO: ${r.error}`, 'err');
   };
   return (
     <div className="stack">
       <div className="grid2">
         <Field label="CUI firmă (fără RO)">
-          <input value={fgo.codUnic ?? ''} onChange={(e) => save({ sources: { fgo: { codUnic: e.target.value.replace(/\s/g, '') } } })} placeholder="12345678" />
+          <input value={fgo.codUnic ?? ''} onChange={(e) => save({ sources: { fgo: { codUnic: e.target.value.replace(/\s/g, '') } } })} placeholder="12345678" className="mono" />
         </Field>
-        <Field label="Cheie API FGO" hint={hasKey ? 'Cheie salvată ✓' : 'FGO → Setări → Utilizatori → cheie API (drepturi: furnizori:citire, facturi:citire)'}>
-          <input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={hasKey ? '••••••••' : 'fgo_api_v2…'} />
+        <Field
+          label="Cheie API FGO v2"
+          hint={
+            hasKey
+              ? 'Cheie salvată pe acest PC. Poți introduce una nouă pentru a o înlocui.'
+              : 'FGO → eCommerce → API. Cheia începe cu fgo_api_v2. Drepturi: furnizori:citire și, dacă trimiți facturile emise, facturi:citire.'
+          }
+        >
+          <input
+            type="password"
+            value={key}
+            onChange={(e) => {
+              setKey(e.target.value);
+              setKeyError('');
+            }}
+            placeholder={hasKey ? '••••••••' : 'fgo_api_v2…'}
+            className="mono"
+          />
         </Field>
       </div>
-      <Toggle checked={fgo.includeSuppliers} onChange={(v) => save({ sources: { fgo: { includeSuppliers: v } } })} label="Facturi de la furnizori" hint="Documentele primite înregistrate în FGO." />
-      <Toggle checked={fgo.includeIssued} onChange={(v) => save({ sources: { fgo: { includeIssued: v } } })} label="Facturi emise de mine" hint="Trimite și PDF-ul facturilor pe care le emiți." />
+      {keyError && <div className="field-error">{keyError}</div>}
+      <Toggle checked={fgo.includeSuppliers} onChange={(v) => save({ sources: { fgo: { includeSuppliers: v } } })} label="Facturi de la furnizori" hint="Documentele primite înregistrate în FGO. Necesită dreptul furnizori:citire." />
+      <Toggle checked={fgo.includeIssued} onChange={(v) => save({ sources: { fgo: { includeIssued: v } } })} label="Facturi emise de mine" hint="Trimite și PDF-ul facturilor pe care le emiți. Necesită dreptul facturi:citire." />
       <div className="row">
-        <button className="btn" onClick={test} disabled={busy || !fgo.codUnic || (!key && !hasKey)}>
-          <Icon name="key" /> {busy ? 'Verific…' : 'Verifică și conectează'}
+        <button className="btn primary" onClick={test} disabled={busy || !fgo.codUnic || (!key && !hasKey)}>
+          <Icon name="key" /> {busy ? 'Verific…' : 'Testează conexiunea'}
+        </button>
+        <button className="btn ghost" type="button" onClick={() => api.openExternal('https://api.fgo.ro/docs/ghiduri/autentificare')}>
+          <Icon name="open" /> Ghid autentificare FGO
         </button>
         {fgo.enabled && (
           <span className="pill ok">
