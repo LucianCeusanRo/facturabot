@@ -1,0 +1,32 @@
+name: Build Windows installer
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      # Opțional: Client ID-urile OAuth pot fi „coapte” în build (Settings → Secrets → Actions),
+      # ca utilizatorul final să nu mai completeze nimic.
+      - run: npm run dist:win
+        env:
+          FACTURABOT_GOOGLE_CLIENT_ID: ${{ secrets.FACTURABOT_GOOGLE_CLIENT_ID }}
+          FACTURABOT_GOOGLE_CLIENT_SECRET: ${{ secrets.FACTURABOT_GOOGLE_CLIENT_SECRET }}
+          FACTURABOT_MS_CLIENT_ID: ${{ secrets.FACTURABOT_MS_CLIENT_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FacturaBot-Setup
+          path: release/*.exe
