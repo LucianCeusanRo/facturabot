@@ -24,7 +24,7 @@
     "@fontsource-variable/geist-mono": "^5.3.0",
     "baileys": "7.0.0-rc14",
     "lucide-react": "^1.81.0",
-    "nodemailer": "^7.0.0",
+    "nodemailer": "^10.1.4",
     "pino": "^9.0.0",
     "qrcode": "^1.5.4",
     "sql.js": "^1.13.0"
