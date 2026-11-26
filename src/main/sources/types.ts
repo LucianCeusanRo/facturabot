@@ -17,6 +17,28 @@ export interface FoundDocument {
   amount?: number | null;
   currency?: string | null;
   invoiceDate?: string | null;
+  /** v0.2 – date folosite la analiză și TVA. */
+  direction?: 'in' | 'out';
+  platform?: string | null;
+  supplierCountry?: string | null;
+  supplierVatId?: string | null;
+  dueDate?: string | null;
+  paid?: boolean | null;
+  /** Text (PDF/email) folosit DOAR pentru detectarea TVA – nu se salvează. */
+  text?: string | null;
+}
+
+export interface TestDeps {
+  settings: Settings;
+  secrets: SecretStore;
+  fetch: typeof fetch;
+  retry?: import('../http.js').RetryOptions;
+}
+
+export interface TestResult {
+  ok: boolean;
+  info?: string;
+  error?: string;
 }
 
 export interface SourceContext {
@@ -43,4 +65,6 @@ export interface InvoiceSource {
   label: string;
   isEnabled(settings: Settings, secrets: SecretStore): boolean;
   fetchNew(ctx: SourceContext): Promise<FoundDocument[]>;
+  /** „Testează conexiunea” – un apel ieftin, fără efecte. */
+  test?(deps: TestDeps): Promise<TestResult>;
 }

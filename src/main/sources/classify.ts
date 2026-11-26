@@ -12,9 +12,9 @@ export interface KnownBiller {
 
 export const KNOWN_BILLERS: KnownBiller[] = [
   { name: 'Meta (Facebook/Instagram Ads)', domains: ['facebookmail.com', 'meta.com', 'fb.com', 'support.facebook.com'], bodyReceipt: true },
-  { name: 'Google', domains: ['google.com', 'payments.google.com', 'ads-noreply@google.com'] },
-  { name: 'TikTok', domains: ['tiktok.com', 'business.tiktok.com', 'tiktokglobalshop.com'] },
-  { name: 'Shopify', domains: ['shopify.com'] },
+  { name: 'Google', domains: ['google.com', 'payments.google.com', 'ads-noreply@google.com'], bodyReceipt: true },
+  { name: 'TikTok', domains: ['tiktok.com', 'business.tiktok.com', 'tiktokglobalshop.com'], bodyReceipt: true },
+  { name: 'Shopify', domains: ['shopify.com'], bodyReceipt: true },
   { name: 'Stripe', domains: ['stripe.com'] },
   { name: 'PayPal', domains: ['paypal.com', 'paypal.ro'], bodyReceipt: true },
   { name: 'eMAG', domains: ['emag.ro'] },

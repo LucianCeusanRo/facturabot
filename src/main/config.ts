@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { TAX_SOURCES } from '../shared/sourcesMeta.js';
 import path from 'node:path';
 import type { DeepPartial, Settings } from '../shared/types.js';
 
@@ -22,7 +23,16 @@ export const LIMITS = {
   maxAttempts: [1, 20],
   retryWindowDays: [1, 60],
   waDelaySeconds: [0, 120],
+  remotePort: [1024, 65535],
+  warnPercent: [10, 99],
+  vatRatePercent: [0, 50],
+  dayOfMonth: [1, 28],
+  dueReminderDays: [0, 30],
+  missingGraceDays: [1, 31],
 } as const;
+
+/** Surse oficiale pentru pragurile fiscale (afișate în aplicație, lângă fiecare valoare). */
+export { TAX_SOURCES };
 
 export const DEFAULT_SETTINGS: Settings = {
   onboardingDone: false,
@@ -36,7 +46,25 @@ export const DEFAULT_SETTINGS: Settings = {
     gmail: { enabled: false, extraQuery: '' },
     outlook: { enabled: false },
     fgo: { enabled: false, codUnic: '', includeIssued: false, includeSuppliers: true, apiBase: env('FACTURABOT_FGO_API_BASE') || 'https://api.fgo.ro' },
+    meta: { enabled: false, businessId: '', apiVersion: env('FACTURABOT_META_API_VERSION') || 'v27.0' },
+    tiktok: { enabled: false, bcId: '', invoiceTypes: [], apiBase: env('FACTURABOT_TIKTOK_API_BASE') || 'https://business-api.tiktok.com/open_api/v1.3' },
+    googleAds: { enabled: false, customerId: '', billingSetupId: '', loginCustomerId: '', apiVersion: env('FACTURABOT_GOOGLE_ADS_API_VERSION') || 'v26' },
   },
+  company: { name: '', vatRegime: 'none', country: 'RO' },
+  tax: {
+    vatThresholdRon: envNum('FACTURABOT_VAT_THRESHOLD_RON', 395_000),
+    vatThresholdSource: TAX_SOURCES.vatThreshold,
+    warnPercent: 80,
+    vatRatePercent: 21,
+    ossThresholdEur: envNum('FACTURABOT_OSS_THRESHOLD_EUR', 10_000),
+    ossThresholdSource: TAX_SOURCES.oss,
+    extraRevenueRon: 0,
+    fxRule: 'previous',
+    bnrBaseUrl: env('FACTURABOT_BNR_BASE') || 'https://curs.bnr.ro',
+    viesBaseUrl: env('FACTURABOT_VIES_BASE') || 'https://ec.europa.eu/taxation_customs/vies/rest-api',
+  },
+  remote: { enabled: false, port: envNum('FACTURABOT_REMOTE_PORT', 8787), publicUrl: '' },
+  reports: { monthlyEnabled: false, dayOfMonth: 3, dueReminderDays: 3, missingGraceDays: 7 },
   accountant: { name: '', whatsappNumber: '', email: '' },
   delivery: {
     whatsappMode: 'web',
@@ -111,6 +139,43 @@ export function sanitizeSettings(s: Settings): Settings {
   out.accountant.whatsappNumber = (out.accountant.whatsappNumber ?? '').trim();
   out.sources.fgo.codUnic = (out.sources.fgo.codUnic ?? '').replace(/^RO/i, '').replace(/\s/g, '');
   if (!/^https:\/\//.test(out.sources.fgo.apiBase || '')) out.sources.fgo.apiBase = d.sources.fgo.apiBase;
+  // Surse directe (Meta / TikTok / Google Ads): ID-uri doar cu cifre, versiuni în formatul oficial.
+  const digits = (v: unknown) => String(v ?? '').replace(/[^\d]/g, '');
+  out.sources.meta.businessId = digits(out.sources.meta.businessId);
+  if (!/^v\d+\.\d+$/.test(out.sources.meta.apiVersion || '')) out.sources.meta.apiVersion = d.sources.meta.apiVersion;
+  out.sources.tiktok.bcId = digits(out.sources.tiktok.bcId);
+  out.sources.tiktok.invoiceTypes = (Array.isArray(out.sources.tiktok.invoiceTypes) ? out.sources.tiktok.invoiceTypes : [])
+    .map((x) => String(x).trim().toUpperCase())
+    .filter((x) => /^[A-Z_]{2,32}$/.test(x));
+  if (!/^https:\/\//.test(out.sources.tiktok.apiBase || '')) out.sources.tiktok.apiBase = d.sources.tiktok.apiBase;
+  out.sources.tiktok.apiBase = out.sources.tiktok.apiBase.replace(/\/+$/, '');
+  out.sources.googleAds.customerId = digits(out.sources.googleAds.customerId);
+  out.sources.googleAds.billingSetupId = digits(out.sources.googleAds.billingSetupId);
+  out.sources.googleAds.loginCustomerId = digits(out.sources.googleAds.loginCustomerId);
+  if (!/^v\d+$/.test(out.sources.googleAds.apiVersion || '')) out.sources.googleAds.apiVersion = d.sources.googleAds.apiVersion;
+  // Firmă + parametri fiscali
+  if (!['none', 'art317', 'art316'].includes(out.company.vatRegime)) out.company.vatRegime = d.company.vatRegime;
+  out.company.country = /^[A-Z]{2}$/.test(String(out.company.country ?? '').toUpperCase()) ? out.company.country.toUpperCase() : 'RO';
+  out.company.name = String(out.company.name ?? '').slice(0, 200);
+  const money = (v: unknown, lo: number, hi: number, def: number) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n * 100) / 100)) : def;
+  };
+  out.tax.vatThresholdRon = money(out.tax.vatThresholdRon, 1, 100_000_000, d.tax.vatThresholdRon);
+  out.tax.ossThresholdEur = money(out.tax.ossThresholdEur, 1, 10_000_000, d.tax.ossThresholdEur);
+  out.tax.extraRevenueRon = money(out.tax.extraRevenueRon, 0, 1_000_000_000, 0);
+  out.tax.warnPercent = clamp(out.tax.warnPercent, LIMITS.warnPercent, d.tax.warnPercent);
+  out.tax.vatRatePercent = clamp(out.tax.vatRatePercent, LIMITS.vatRatePercent, d.tax.vatRatePercent);
+  if (!['previous', 'same-day'].includes(out.tax.fxRule)) out.tax.fxRule = d.tax.fxRule;
+  for (const k of ['bnrBaseUrl', 'viesBaseUrl', 'vatThresholdSource', 'ossThresholdSource'] as const) {
+    if (!/^https:\/\//.test(out.tax[k] || '')) out.tax[k] = d.tax[k];
+    out.tax[k] = out.tax[k].replace(/\/+$/, '');
+  }
+  out.remote.port = clamp(out.remote.port, LIMITS.remotePort, d.remote.port);
+  out.remote.publicUrl = /^https:\/\/[^\s]+$/.test(String(out.remote.publicUrl ?? '').trim()) ? out.remote.publicUrl.trim().replace(/\/+$/, '') : '';
+  out.reports.dayOfMonth = clamp(out.reports.dayOfMonth, LIMITS.dayOfMonth, d.reports.dayOfMonth);
+  out.reports.dueReminderDays = clamp(out.reports.dueReminderDays, LIMITS.dueReminderDays, d.reports.dueReminderDays);
+  out.reports.missingGraceDays = clamp(out.reports.missingGraceDays, LIMITS.missingGraceDays, d.reports.missingGraceDays);
   // Valorile din mediu au prioritate doar când utilizatorul nu a completat nimic.
   out.oauthClients.googleClientId = (out.oauthClients.googleClientId || d.oauthClients.googleClientId).trim();
   out.oauthClients.microsoftClientId = (out.oauthClients.microsoftClientId || d.oauthClients.microsoftClientId).trim();
@@ -127,6 +192,9 @@ export function settingsProblems(s: Settings): string[] {
   if (s.delivery.whatsappMode !== 'none' && !a.whatsappNumber) p.push('Ai ales WhatsApp, dar lipsește numărul contabilei.');
   if (s.delivery.whatsappMode === 'cloud' && !s.delivery.cloud.phoneNumberId) p.push('WhatsApp Business API: lipsește Phone number ID.');
   if (s.delivery.emailProvider === 'smtp' && !s.delivery.smtp.host) p.push('Email prin SMTP: lipsește serverul.');
+  if (s.sources.meta.enabled && !s.sources.meta.businessId) p.push('Meta Ads: lipsește Business ID.');
+  if (s.sources.tiktok.enabled && !s.sources.tiktok.bcId) p.push('TikTok Ads: lipsește Business Center ID.');
+  if (s.sources.googleAds.enabled && (!s.sources.googleAds.customerId || !s.sources.googleAds.billingSetupId)) p.push('Google Ads: lipsesc Customer ID / Billing setup ID.');
   return p;
 }
 

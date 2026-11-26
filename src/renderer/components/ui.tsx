@@ -77,6 +77,9 @@ export function SourceLogo({ source }: { source: string }) {
     gmail: ['G', 'logo-gmail'],
     outlook: ['O', 'logo-outlook'],
     fgo: ['F', 'logo-fgo'],
+    meta: ['M', 'logo-meta'],
+    tiktok: ['T', 'logo-tiktok'],
+    googleAds: ['A', 'logo-gads'],
   };
   const [ch, cls] = m[source] ?? ['?', ''];
   return <span className={`src-logo ${cls}`}>{ch}</span>;

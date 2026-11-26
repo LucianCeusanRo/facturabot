@@ -42,7 +42,7 @@ describe('Db', () => {
     const file = path.join(tmpDir(), 'old.sqlite');
     fs.writeFileSync(file, Buffer.from(old.export()));
     const db = await Db.open(file);
-    expect(db.listInvoices()[0]).toMatchObject({ externalId: 'old', attempts: 0 });
+    expect(db.listInvoices()[0]).toMatchObject({ externalId: 'old', attempts: 0, direction: 'in', vatTreatment: 'unknown', amountRon: null, paid: null, platform: null });
   });
 
   it('jurnal și kv', async () => {

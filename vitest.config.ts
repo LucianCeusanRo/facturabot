@@ -10,7 +10,7 @@ export default defineConfig({
       // Doar „lipici” Electron (ferestre, tray, IPC) – testat manual / prin capturi de ecran.
       exclude: ['src/main/index.ts', 'src/main/demo.ts'],
       reporter: ['text-summary', 'text', 'html', 'json-summary'],
-      thresholds: { lines: 70, functions: 70, branches: 60, statements: 70 },
+      thresholds: { lines: 90, functions: 90, branches: 75, statements: 90 },
     },
   },
 });

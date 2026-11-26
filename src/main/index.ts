@@ -1,25 +1,33 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, Notification, safeStorage, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, safeStorage, shell, Tray } from 'electron';
+import QRCode from 'qrcode';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { DeepPartial, InvoiceStatus, SecretKey, Settings } from '../shared/types.js';
+import type { DeepPartial, DirectSourceId, InvoiceStatus, SecretKey, Settings } from '../shared/types.js';
 import { SettingsStore } from './config.js';
 import { Db } from './db.js';
 import { WhatsAppWeb } from './delivery/whatsappWeb.js';
 import { WhatsAppCloud } from './delivery/whatsappCloud.js';
 import { deliver } from './delivery/dispatcher.js';
-import { connectGoogle } from './oauth/google.js';
+import { connectGoogle, connectGoogleAds } from './oauth/google.js';
 import { connectMicrosoft } from './oauth/microsoft.js';
 import { SecretStore } from './secrets.js';
 import { FgoClient, fgoNeededRights, isValidFgoApiKey, normalizeFgoApiKey } from './sources/fgo.js';
 import { SyncEngine } from './sync.js';
 import { seedDemo } from './demo.js';
+import { Finance } from './finance.js';
+import { exportTable, isMonth } from './export/package.js';
+import { RemoteServer } from './remote/server.js';
+import { sourceById } from './sources/registry.js';
+import { parseVatId } from './tax/vat.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEMO = process.env.FACTURABOT_DEMO === '1';
 const SCREENSHOT_DIR = process.env.FACTURABOT_SCREENSHOT_DIR;
 
+// Capturi „retina” (ex. telefon la DPR 3): FACTURABOT_SCREENSHOT_DPR=3.
+if (process.env.FACTURABOT_SCREENSHOT_DPR) app.commandLine.appendSwitch('force-device-scale-factor', process.env.FACTURABOT_SCREENSHOT_DPR);
 if (DEMO) app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'facturabot-demo-')));
 else if (process.env.FACTURABOT_DATA_DIR) app.setPath('userData', path.resolve(process.env.FACTURABOT_DATA_DIR));
 app.setAppUserModelId('ro.facturabot.app');
@@ -59,8 +67,61 @@ async function main() {
   if (DEMO) seedDemo(db, settings, secrets, waWeb);
 
   const broadcast = () => win?.webContents.send('status', engine.snapshot(waWeb.getState().status));
+  const finance = new Finance({ db, settings, secrets, notify });
   // În modul demo nu atingem conturi reale: nicio sursă activă.
-  const engine = new SyncEngine({ db, settings, secrets, waWeb, dataDir, htmlToPdf, notify, onChange: broadcast, sources: DEMO ? [] : undefined });
+  const engine = new SyncEngine({ db, settings, secrets, waWeb, dataDir, htmlToPdf, notify, onChange: broadcast, sources: DEMO ? [] : undefined, finance });
+
+  // ---------- Panou pe telefon (opțional) ----------
+  const monthRange = () => {
+    const now = new Date();
+    return { from: `${now.getFullYear()}-01-01`, to: now.toISOString().slice(0, 10) };
+  };
+  const remote = new RemoteServer({
+    kv: db,
+    staticDir: path.join(__dirname, '../renderer'),
+    log: (l, m) => db.log(l, m),
+    qr: (t) => QRCode.toDataURL(t, { margin: 1, width: 360, errorCorrectionLevel: 'M' }),
+    publicUrl: () => settings.get().remote.publicUrl,
+    api: {
+      status: () => engine.snapshot(waWeb.getState().status),
+      listInvoices: (st, limit) => db.listInvoices(st, limit),
+      getInvoice: (id) => db.getInvoice(id),
+      approve: (id) => engine.approve(id),
+      skip: (id) => {
+        db.setStatus(id, 'skipped');
+        broadcast();
+      },
+      sync: async () => {
+        await engine.runOnce();
+      },
+      spending: (from, to) => finance.spending(from, to),
+      tax: (o) => finance.tax(o),
+      insights: () => finance.insights(),
+      exportTable: (format, from, to) => exportTable({ db, finance, from, to, format }),
+      packageZip: async (month) => (await engine.sendMonthlyPackage(month, false)).zipPath,
+      info: () => {
+        const s = settings.get();
+        return { company: s.company.name, accountant: s.accountant.name, whatsappMode: s.delivery.whatsappMode, pollMinutes: s.pollMinutes, version: app.getVersion(), range: monthRange() };
+      },
+    },
+  });
+  const pushRemote = async () => win?.webContents.send('remote-state', await remote.state());
+  const applyRemote = async () => {
+    const r = settings.get().remote;
+    try {
+      if (r.enabled && (!remote.running || remote.port !== r.port)) {
+        await remote.stop();
+        await remote.start(r.port);
+        db.log('info', `Panoul pentru telefon pornit pe portul ${remote.port}`);
+      } else if (!r.enabled && remote.running) {
+        await remote.stop();
+        db.log('info', 'Panoul pentru telefon a fost oprit');
+      }
+    } catch (e) {
+      db.log('error', `Panou telefon: ${(e as Error).message}`);
+    }
+    await pushRemote();
+  };
 
   if (DEMO) engine.nextSync = new Date(Date.now() + 14 * 60_000);
   waWeb.on('state', (s) => {
@@ -83,6 +144,7 @@ async function main() {
     applyAutostart(s);
     // Programăm verificarea periodică imediat după terminarea asistentului sau la schimbarea intervalului.
     if (s.onboardingDone && (!wasDone || s.pollMinutes !== prevPoll) && !DEMO) engine.schedule();
+    if (patch.remote) applyRemote();
     broadcast();
     return s;
   });
@@ -139,6 +201,78 @@ async function main() {
     const r = await new FgoClient(normalizeFgoApiKey(key), s.codUnic, s.apiBase).probe(fgoNeededRights(s));
     return r;
   });
+  handle('source:test', async (id: DirectSourceId) => {
+    const src = sourceById(id);
+    if (!src?.test || !['meta', 'tiktok', 'googleAds'].includes(id)) return { ok: false, error: 'Sursă necunoscută' };
+    const r = await src.test({ settings: settings.get(), secrets, fetch });
+    if (r.ok) settings.update({ sources: { [id]: { enabled: true } } } as DeepPartial<Settings>);
+    broadcast();
+    return r;
+  });
+  handle('googleAds:connect', async () => {
+    try {
+      const t = await connectGoogleAds(settings.get().oauthClients.googleClientId, secrets, (u) => shell.openExternal(u));
+      settings.update({ sources: { googleAds: { account: t.account } } });
+      win?.show();
+      broadcast();
+      return { ok: true, account: t.account };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  });
+  handle('finance:spending', (o?: { from?: string; to?: string }) => {
+    const r = monthRange();
+    const day = /^\d{4}-\d{2}-\d{2}$/;
+    return finance.spending(o?.from && day.test(o.from) ? o.from : r.from, o?.to && day.test(o.to) ? o.to : r.to);
+  });
+  handle('finance:tax', (o?: { year?: number; month?: string }) => finance.tax({ year: o?.year, month: o?.month && isMonth(o.month) ? o.month : undefined, checkVies: !DEMO }));
+  handle('finance:insights', () => finance.insights());
+  handle('vies:check', async (vatId: string) => {
+    if (!parseVatId(vatId)) return { ok: false, error: 'Format invalid (ex. IE9692928F)' };
+    return finance.vies(vatId, true);
+  });
+  handle('export:data', async (o: { format: 'csv' | 'xlsx'; from: string; to: string }) => {
+    try {
+      if (!['csv', 'xlsx'].includes(o?.format) || !/^\d{4}-\d{2}-\d{2}$/.test(o.from) || !/^\d{4}-\d{2}-\d{2}$/.test(o.to)) throw new Error('Parametri invalizi');
+      await finance.convertPending().catch(() => undefined);
+      const out = exportTable({ db, finance, ...o });
+      const target = SCREENSHOT_DIR
+        ? path.join(dataDir, out.fileName)
+        : (await dialog.showSaveDialog(win!, { defaultPath: path.join(app.getPath('documents'), out.fileName), filters: [{ name: o.format.toUpperCase(), extensions: [o.format] }] })).filePath;
+      if (!target) return { ok: false, error: 'Anulat' };
+      fs.writeFileSync(target, out.data);
+      shell.showItemInFolder(target);
+      return { ok: true, path: target };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  });
+  handle('package:build', async (month: string, send?: boolean) => {
+    try {
+      const r = await engine.sendMonthlyPackage(month, !!send);
+      if (!send) shell.showItemInFolder(r.zipPath);
+      broadcast();
+      return { ok: true, path: r.zipPath, sentVia: r.sentVia };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  });
+  handle('remote:state', () => remote.state());
+  handle('remote:enable', async (on: boolean) => {
+    settings.update({ remote: { enabled: !!on } });
+    await applyRemote();
+    if (on && remote.running && !remote.devices().length) remote.newPairing();
+    return remote.state();
+  });
+  handle('remote:pair', async () => {
+    if (!remote.running) await applyRemote();
+    remote.newPairing();
+    return remote.state();
+  });
+  handle('remote:revoke', async (id: string) => {
+    remote.revoke(String(id));
+    return remote.state();
+  });
   handle('wa:start', () => (DEMO ? waWeb.simulateQr() : waWeb.start()));
   handle('wa:logout', () => waWeb.logout());
   handle('wa:state', () => waWeb.getState());
@@ -184,6 +318,7 @@ async function main() {
   });
 
   createWindow(process.argv.includes('--hidden'));
+  if (settings.get().remote.enabled) applyRemote();
   createTray(engine);
   createAppMenu(engine);
 
@@ -196,12 +331,16 @@ async function main() {
   app.on('before-quit', () => {
     quitting = true;
     engine.stop();
+    remote.stop();
   });
   app.on('window-all-closed', () => {
     /* rămânem în tray */
   });
 
-  if (SCREENSHOT_DIR) await takeScreenshots(SCREENSHOT_DIR);
+  if (SCREENSHOT_DIR) {
+    if (DEMO && settings.get().remote.enabled) await applyRemote();
+    await takeScreenshots(SCREENSHOT_DIR, remote.running ? { base: `http://127.0.0.1:${remote.port}`, pairCode: () => remote.newPairing().code } : null);
+  }
 }
 
 function applyAutostart(s: Settings) {
@@ -219,8 +358,8 @@ function createWindow(hidden: boolean) {
   win = new BrowserWindow({
     width: 1280,
     height: 800,
-    minWidth: 980,
-    minHeight: 640,
+    minWidth: 380,
+    minHeight: 560,
     show: !hidden,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#000000' : '#f2f4f7',
     title: 'FacturaBot',
@@ -272,6 +411,7 @@ function createTray(engine: SyncEngine) {
       { label: 'Deschide FacturaBot', click: () => showWindow() },
       { label: 'Sincronizează acum', click: () => engine.runOnce() },
       { label: 'Istoric', click: () => showWindow('history') },
+      { label: 'Cheltuieli și TVA', click: () => showWindow('spending') },
       { label: 'Setări', click: () => showWindow('settings') },
       { type: 'separator' },
       {
@@ -312,7 +452,9 @@ function createAppMenu(engine: SyncEngine) {
         submenu: [
           { label: 'Acasă', accelerator: 'CmdOrCtrl+1', click: nav('dashboard') },
           { label: 'Istoric', accelerator: 'CmdOrCtrl+2', click: nav('history') },
-          { label: 'Setări', accelerator: 'CmdOrCtrl+3', click: nav('settings') },
+          { label: 'Cheltuieli', accelerator: 'CmdOrCtrl+3', click: nav('spending') },
+          { label: 'TVA', accelerator: 'CmdOrCtrl+4', click: nav('tax') },
+          { label: 'Setări', accelerator: 'CmdOrCtrl+5', click: nav('settings') },
           { label: 'Asistent de configurare', click: nav('onboarding-1') },
         ],
       },
@@ -333,8 +475,36 @@ function createAppMenu(engine: SyncEngine) {
   app.setAboutPanelOptions({ applicationName: 'FacturaBot', applicationVersion: app.getVersion(), copyright: '© 2026 Lucian Ceușan' });
 }
 
+/** Capturi ale panoului de pe telefon (390×844, DPR 3) – același server ca pe un telefon real. */
+async function takeMobileShots(dir: string, themes: string[], m: { base: string; pairCode: () => string }) {
+  const tabs = (process.env.FACTURABOT_SCREENSHOT_MOBILE ?? '').split(',').filter(Boolean);
+  if (!tabs.length) return;
+  const token = process.env.FACTURABOT_DEMO_REMOTE_TOKEN ?? '';
+  const W = 390;
+  const H = 844;
+  for (const theme of themes) {
+    nativeTheme.themeSource = theme as 'dark' | 'light';
+    for (const tab of tabs) {
+      const unpaired = tab === 'pair';
+      const partition = unpaired ? `mobile-unpaired-${theme}` : `mobile-${theme}`;
+      const mw = new BrowserWindow({ show: true, useContentSize: true, width: W, height: H, frame: false, webPreferences: { partition, contextIsolation: true, sandbox: true } });
+      if (!unpaired && token) await mw.webContents.session.cookies.set({ url: m.base, name: 'fb_s', value: token, httpOnly: true, sameSite: 'strict' });
+      mw.webContents.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1');
+      const [name, scroll] = tab.split('@');
+      const url = unpaired ? `${m.base}/#pair=${m.pairCode()}` : `${m.base}/${name === 'home' ? '' : `#${name}`}`;
+      await mw.loadURL(url);
+      await new Promise((r) => setTimeout(r, 1800));
+      if (scroll) await mw.webContents.executeJavaScript(`window.scrollTo(0, ${Number(scroll)})`);
+      await new Promise((r) => setTimeout(r, 400));
+      const img = await mw.webContents.capturePage();
+      fs.writeFileSync(path.join(dir, `mobile-${scroll ? `${name}-scroll${scroll}` : name}-${theme}.png`), img.toPNG());
+      mw.destroy();
+    }
+  }
+}
+
 /** Mod folosit doar la dezvoltare: randează fiecare ecran și salvează PNG-uri. */
-async function takeScreenshots(dir: string) {
+async function takeScreenshots(dir: string, mobile: { base: string; pairCode: () => string } | null) {
   fs.mkdirSync(dir, { recursive: true });
   const w = win!;
   w.setContentSize(Number(process.env.FACTURABOT_SCREENSHOT_W ?? 1280), Number(process.env.FACTURABOT_SCREENSHOT_H ?? 820));
@@ -342,7 +512,7 @@ async function takeScreenshots(dir: string) {
   if (w.webContents.isLoading()) await new Promise<void>((r) => w.webContents.once('did-finish-load', () => r()));
   await new Promise((r) => setTimeout(r, 1500));
   console.log('[screenshot] viewport', await w.webContents.executeJavaScript('`${innerWidth}x${innerHeight}@${devicePixelRatio}`'));
-  const pages = (process.env.FACTURABOT_SCREENSHOT_PAGES ?? 'dashboard,history,settings,onboarding-1,onboarding-4').split(',');
+  const pages = (process.env.FACTURABOT_SCREENSHOT_PAGES ?? 'dashboard,history,settings,onboarding-1,onboarding-4').split(',').filter((p) => p && p !== 'none');
   const themes = (process.env.FACTURABOT_SCREENSHOT_THEMES ?? 'dark,light').split(',');
   for (const theme of themes) {
     nativeTheme.themeSource = theme as 'dark' | 'light';
@@ -358,6 +528,7 @@ async function takeScreenshots(dir: string) {
       fs.writeFileSync(path.join(dir, `${name}-${theme}.png`), img.toPNG());
     }
   }
+  if (mobile) await takeMobileShots(dir, themes, mobile);
   quitting = true;
   app.quit();
 }

@@ -1,5 +1,6 @@
 import { fetchWithRetry } from '../http.js';
 import { googleAccessToken } from '../oauth/google.js';
+import { htmlToText, parseReceipt } from '../parsers/amounts.js';
 import { classify, extractPdfText, extractSeriesNumber, KNOWN_BILLERS, sanitizeFileName } from './classify.js';
 import type { FoundDocument, InvoiceSource, SourceContext } from './types.js';
 
@@ -90,6 +91,7 @@ export const gmailSource: InvoiceSource = {
           const pdfText = extractPdfText(data);
           const c2 = classify({ from, subject, fileName: p.filename, mimeType: p.mimeType, bodySnippet: msg.snippet, pdfText }, det);
           if (!c2.isInvoice) continue;
+          const facts = parseReceipt({ from, subject, text: `${pdfText}\n${msg.snippet ?? ''}` });
           docs.push({
             externalId,
             vendor: c2.biller?.name ?? from.replace(/<.*>/, '').replace(/"/g, '').trim(),
@@ -97,8 +99,13 @@ export const gmailSource: InvoiceSource = {
             fileName: sanitizeFileName(p.filename!),
             data,
             mimeType: 'application/pdf',
-            seriesNumber: extractSeriesNumber(p.filename, subject, pdfText),
+            seriesNumber: extractSeriesNumber(p.filename, subject, pdfText) ?? facts.number,
             invoiceDate: date.toISOString().slice(0, 10),
+            amount: facts.amount,
+            currency: facts.currency,
+            dueDate: facts.dueDate,
+            platform: facts.platform,
+            text: pdfText,
           });
         }
       } else {
@@ -114,6 +121,8 @@ export const gmailSource: InvoiceSource = {
           : `<pre>${b64urlToBuf(textPart?.body?.data ?? '').toString('utf8').replace(/</g, '&lt;')}</pre>`;
         const header = `<div style="font:12px sans-serif;color:#555;border-bottom:1px solid #ddd;padding:8px;margin-bottom:8px">De la: ${from.replace(/</g, '&lt;')}<br>Subiect: ${subject.replace(/</g, '&lt;')}<br>Data: ${date.toLocaleString('ro-RO')}</div>`;
         const pdf = await ctx.htmlToPdf(header + html);
+        const bodyText = htmlPart ? htmlToText(html) : b64urlToBuf(textPart?.body?.data ?? '').toString('utf8');
+        const facts = parseReceipt({ from, subject, text: bodyText });
         docs.push({
           externalId,
           vendor: c.biller.name,
@@ -121,8 +130,13 @@ export const gmailSource: InvoiceSource = {
           fileName: sanitizeFileName(`${c.biller.name.split(' ')[0]}_chitanta_${date.toISOString().slice(0, 10)}_${id.slice(-6)}.pdf`),
           data: pdf,
           mimeType: 'application/pdf',
-          seriesNumber: extractSeriesNumber(subject),
+          seriesNumber: extractSeriesNumber(subject) ?? facts.number,
           invoiceDate: date.toISOString().slice(0, 10),
+          amount: facts.amount,
+          currency: facts.currency,
+          dueDate: facts.dueDate,
+          platform: facts.platform,
+          text: bodyText,
         });
       }
     }

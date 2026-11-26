@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import initSqlJs, { type Database, type SqlValue } from 'sql.js';
-import type { DeliveryChannel, InvoiceRecord, InvoiceStatus, LogEntry } from '../shared/types.js';
+import type { DeliveryChannel, InvoiceRecord, InvoiceStatus, LogEntry, VatTreatment } from '../shared/types.js';
 
 const require = createRequire(import.meta.url);
 
@@ -18,8 +18,28 @@ export interface NewInvoice {
   amount?: number | null;
   currency?: string | null;
   invoiceDate?: string | null;
+  direction?: 'in' | 'out';
+  platform?: string | null;
+  supplierCountry?: string | null;
+  supplierVatId?: string | null;
+  vatTreatment?: VatTreatment;
+  dueDate?: string | null;
+  paid?: boolean | null;
   status: InvoiceStatus;
 }
+
+/** Coloane adăugate în v0.2 (migrare automată pentru bazele create de v0.1). */
+const V2_COLUMNS: [string, string][] = [
+  ['direction', "TEXT NOT NULL DEFAULT 'in'"],
+  ['platform', 'TEXT'],
+  ['supplier_country', 'TEXT'],
+  ['supplier_vat_id', 'TEXT'],
+  ['vat_treatment', "TEXT NOT NULL DEFAULT 'unknown'"],
+  ['due_date', 'TEXT'],
+  ['paid', 'INTEGER'],
+  ['amount_ron', 'REAL'],
+  ['fx_rate', 'REAL'],
+];
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS invoices (
@@ -52,6 +72,7 @@ CREATE TABLE IF NOT EXISTS logs (
   message TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS fx_rates (day TEXT NOT NULL, currency TEXT NOT NULL, rate REAL NOT NULL, PRIMARY KEY (day, currency));
 `;
 
 /** Baza de date locală (SQLite compilat în WebAssembly – fără module native, ușor de împachetat). */
@@ -69,6 +90,8 @@ export class Db {
     // Migrare pentru baze create de versiuni mai vechi.
     const cols = db.exec('PRAGMA table_info(invoices)')[0]?.values.map((v) => String(v[1])) ?? [];
     if (!cols.includes('attempts')) db.exec('ALTER TABLE invoices ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');
+    for (const [c, def] of V2_COLUMNS) if (!cols.includes(c)) db.exec(`ALTER TABLE invoices ADD COLUMN ${c} ${def}`);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_inv_date ON invoices(invoice_date)');
     // Dacă aplicația s-a oprit în timpul unei trimiteri, documentul revine în coadă.
     db.exec("UPDATE invoices SET status='pending' WHERE status='sending'");
     const inst = new Db(db, file);
@@ -118,8 +141,9 @@ export class Db {
 
   insertInvoice(inv: NewInvoice): number {
     this.db.run(
-      `INSERT OR IGNORE INTO invoices (source, external_id, file_hash, series_number, vendor, subject, file_name, file_path, amount, currency, invoice_date, status, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT OR IGNORE INTO invoices (source, external_id, file_hash, series_number, vendor, subject, file_name, file_path, amount, currency, invoice_date, status, created_at,
+         direction, platform, supplier_country, supplier_vat_id, vat_treatment, due_date, paid)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         inv.source,
         inv.externalId,
@@ -134,6 +158,13 @@ export class Db {
         inv.invoiceDate ?? null,
         inv.status,
         new Date().toISOString(),
+        inv.direction ?? 'in',
+        inv.platform ?? null,
+        inv.supplierCountry ?? null,
+        inv.supplierVatId ?? null,
+        inv.vatTreatment ?? 'unknown',
+        inv.dueDate ?? null,
+        inv.paid == null ? null : inv.paid ? 1 : 0,
       ],
     );
     if (this.db.getRowsModified() === 0) return 0; // INSERT OR IGNORE a ignorat (deja există)
@@ -142,12 +173,12 @@ export class Db {
     return id;
   }
 
-  setStatus(id: number, status: InvoiceStatus, extra: { channel?: DeliveryChannel | null; error?: string | null } = {}) {
+  setStatus(id: number, status: InvoiceStatus, extra: { channel?: DeliveryChannel | null; error?: string | null; sentAt?: string } = {}) {
     this.run('UPDATE invoices SET status=?, channel=COALESCE(?, channel), error=?, sent_at=? WHERE id=?', [
       status,
       extra.channel ?? null,
       extra.error ?? null,
-      status === 'sent' ? new Date().toISOString() : null,
+      status === 'sent' ? (extra.sentAt ?? new Date().toISOString()) : null,
       id,
     ]);
   }
@@ -172,6 +203,69 @@ export class Db {
         ? this.all('SELECT * FROM invoices ORDER BY id DESC LIMIT ?', [limit])
         : this.all('SELECT * FROM invoices WHERE status=? ORDER BY id DESC LIMIT ?', [status, limit]);
     return rows.map(mapInvoice);
+  }
+
+  /** Facturi cu data facturii în [from, to] (YYYY-MM-DD), fără duplicate/ignorate. */
+  listByDate(from: string, to: string, direction: 'in' | 'out' | 'all' = 'in'): InvoiceRecord[] {
+    const dir = direction === 'all' ? '' : ' AND direction=?';
+    const p: SqlValue[] = [from, to];
+    if (direction !== 'all') p.push(direction);
+    return this.all(
+      `SELECT * FROM invoices WHERE status NOT IN ('duplicate','skipped') AND COALESCE(invoice_date, substr(created_at,1,10)) BETWEEN ? AND ?${dir} ORDER BY invoice_date, id`,
+      p,
+    ).map(mapInvoice);
+  }
+
+  /** Facturi cu sumă în valută dar fără conversie în lei (de completat cu cursul BNR). */
+  listUnconverted(limit = 500): InvoiceRecord[] {
+    return this.all("SELECT * FROM invoices WHERE amount IS NOT NULL AND amount_ron IS NULL AND status!='duplicate' ORDER BY id DESC LIMIT ?", [limit]).map(mapInvoice);
+  }
+
+  setConversion(id: number, amountRon: number, fxRate: number) {
+    this.run('UPDATE invoices SET amount_ron=?, fx_rate=? WHERE id=?', [amountRon, fxRate, id]);
+  }
+
+  setTax(id: number, t: { supplierCountry?: string | null; supplierVatId?: string | null; vatTreatment?: VatTreatment }) {
+    this.run('UPDATE invoices SET supplier_country=COALESCE(?, supplier_country), supplier_vat_id=COALESCE(?, supplier_vat_id), vat_treatment=COALESCE(?, vat_treatment) WHERE id=?', [
+      t.supplierCountry ?? null,
+      t.supplierVatId ?? null,
+      t.vatTreatment ?? null,
+      id,
+    ]);
+  }
+
+  /** Facturi neachitate cu scadență (pentru mementouri). */
+  listDue(): InvoiceRecord[] {
+    return this.all("SELECT * FROM invoices WHERE due_date IS NOT NULL AND paid=0 AND status NOT IN ('duplicate','skipped') ORDER BY due_date").map(mapInvoice);
+  }
+
+  // ---------- Curs valutar BNR (cache local) ----------
+  putRates(rows: { day: string; currency: string; rate: number }[]) {
+    if (!rows.length) return;
+    this.db.run('BEGIN');
+    try {
+      for (const r of rows) this.db.run('INSERT OR REPLACE INTO fx_rates (day, currency, rate) VALUES (?,?,?)', [r.day, r.currency, r.rate]);
+      this.db.run('COMMIT');
+    } catch (e) {
+      this.db.run('ROLLBACK');
+      throw e;
+    }
+    this.save();
+  }
+
+  /** Ultimul curs publicat înainte de (strict) sau la data dată. */
+  findRate(currency: string, day: string, strictlyBefore: boolean): { day: string; rate: number } | null {
+    const r = this.all(`SELECT day, rate FROM fx_rates WHERE currency=? AND day ${strictlyBefore ? '<' : '<='} ? ORDER BY day DESC LIMIT 1`, [currency, day])[0];
+    return r ? { day: String(r.day), rate: Number(r.rate) } : null;
+  }
+
+  hasRatesFor(year: number): boolean {
+    return this.all('SELECT 1 FROM fx_rates WHERE day BETWEEN ? AND ? LIMIT 1', [`${year}-01-01`, `${year}-12-31`]).length > 0;
+  }
+
+  latestRateDay(): string | null {
+    const r = this.all('SELECT MAX(day) d FROM fx_rates')[0];
+    return r?.d ? String(r.d) : null;
   }
 
   stats() {
@@ -243,6 +337,15 @@ function mapInvoice(r: Record<string, SqlValue>): InvoiceRecord {
     amount: r.amount === null ? null : Number(r.amount),
     currency: s(r.currency),
     invoiceDate: s(r.invoice_date),
+    direction: r.direction === 'out' ? 'out' : 'in',
+    platform: s(r.platform),
+    supplierCountry: s(r.supplier_country),
+    supplierVatId: s(r.supplier_vat_id),
+    vatTreatment: (s(r.vat_treatment) ?? 'unknown') as VatTreatment,
+    dueDate: s(r.due_date),
+    paid: r.paid === null || r.paid === undefined ? null : Number(r.paid) === 1,
+    amountRon: r.amount_ron === null || r.amount_ron === undefined ? null : Number(r.amount_ron),
+    fxRate: r.fx_rate === null || r.fx_rate === undefined ? null : Number(r.fx_rate),
     status: r.status as InvoiceStatus,
     channel: s(r.channel) as DeliveryChannel | null,
     error: s(r.error),

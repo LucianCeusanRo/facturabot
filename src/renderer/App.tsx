@@ -6,8 +6,10 @@ import { Dashboard } from './pages/Dashboard';
 import { History } from './pages/History';
 import { Onboarding } from './pages/Onboarding';
 import { SettingsPage } from './pages/Settings';
+import { Spending } from './pages/Spending';
+import { Tax } from './pages/Tax';
 
-export type Page = 'dashboard' | 'history' | 'settings';
+export type Page = 'dashboard' | 'history' | 'spending' | 'tax' | 'settings';
 
 export interface Store {
   settings: Settings;
@@ -86,6 +88,8 @@ export function App() {
   const nav: { id: Page; label: string; icon: string }[] = [
     { id: 'dashboard', label: 'Facturi', icon: 'home' },
     { id: 'history', label: 'Istoric', icon: 'history' },
+    { id: 'spending', label: 'Cheltuieli', icon: 'chart' },
+    { id: 'tax', label: 'TVA', icon: 'tax' },
     { id: 'settings', label: 'Setări', icon: 'settings' },
   ];
 
@@ -97,23 +101,23 @@ export function App() {
           <div className="logo">
             <Icon name="send" size={18} />
           </div>
-          <div>
+          <div className="brand-text">
             <div className="brand-name">FacturaBot</div>
             <div className="brand-sub">către contabilă</div>
           </div>
         </div>
         <nav>
           {nav.map((n) => (
-            <button key={n.id} className={`nav-item ${page === n.id ? 'active' : ''}`} onClick={() => setPage(n.id)}>
+            <button key={n.id} className={`nav-item ${page === n.id ? 'active' : ''}`} onClick={() => setPage(n.id)} title={n.label} aria-label={n.label}>
               <Icon name={n.icon} />
-              {n.label}
+              <span className="nav-label">{n.label}</span>
               {n.id === 'history' && (status?.stats.pending ?? 0) > 0 && <span className="badge">{status!.stats.pending}</span>}
             </button>
           ))}
         </nav>
         <div className="sidebar-foot">
           <div className={`pulse ${status?.syncing ? 'busy' : 'idle'}`} />
-          <div>
+          <div className="foot-text">
             <div className="foot-title">{status?.syncing ? 'Sincronizez…' : 'Rulează în fundal'}</div>
             <div className="foot-sub">
               {status?.nextSync ? `Următoarea verificare ${relTimeShort(status.nextSync)}` : `La fiecare ${settings.pollMinutes} min`}
@@ -124,6 +128,8 @@ export function App() {
       <main className="content">
         {page === 'dashboard' && <Dashboard store={store} go={setPage} />}
         {page === 'history' && <History store={store} />}
+        {page === 'spending' && <Spending store={store} />}
+        {page === 'tax' && <Tax store={store} go={setPage} />}
         {page === 'settings' && <SettingsPage store={store} />}
       </main>
       {toastLayer}

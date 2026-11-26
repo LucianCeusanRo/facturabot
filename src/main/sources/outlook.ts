@@ -1,5 +1,6 @@
 import { fetchWithRetry } from '../http.js';
 import { microsoftAccessToken } from '../oauth/microsoft.js';
+import { parseReceipt } from '../parsers/amounts.js';
 import { classify, extractPdfText, extractSeriesNumber, sanitizeFileName } from './classify.js';
 import type { FoundDocument, InvoiceSource, SourceContext } from './types.js';
 
@@ -44,6 +45,7 @@ export const outlookSource: InvoiceSource = {
           const pdfText = extractPdfText(data);
           const c2 = classify({ from, subject: m.subject ?? '', fileName: a.name, mimeType: a.contentType, bodySnippet: m.bodyPreview, pdfText }, det);
           if (!c2.isInvoice) continue;
+          const facts = parseReceipt({ from, subject: m.subject ?? '', text: `${pdfText}\n${m.bodyPreview ?? ''}` });
           docs.push({
             externalId,
             vendor: c2.biller?.name ?? m.from?.emailAddress?.name ?? null,
@@ -51,8 +53,13 @@ export const outlookSource: InvoiceSource = {
             fileName: sanitizeFileName(a.name),
             data,
             mimeType: 'application/pdf',
-            seriesNumber: extractSeriesNumber(a.name, m.subject, pdfText),
+            seriesNumber: extractSeriesNumber(a.name, m.subject, pdfText) ?? facts.number,
             invoiceDate: String(m.receivedDateTime).slice(0, 10),
+            amount: facts.amount,
+            currency: facts.currency,
+            dueDate: facts.dueDate,
+            platform: facts.platform,
+            text: pdfText,
           });
         }
       }

@@ -267,6 +267,10 @@ export const fgoSource: InvoiceSource = {
           amount: it.total ?? null,
           currency: it.valuta ?? 'RON',
           invoiceDate: it.data_emitere ?? null,
+          dueDate: it.data_scadenta ?? null,
+          paid: it.platita == null ? null : !!it.platita,
+          // Furnizorii din FGO cu cod unic numeric sunt firme românești (e-Factura).
+          supplierCountry: /^\d{2,10}$/.test(String(it.cod_unic_furnizor ?? '')) ? 'RO' : null,
           summary:
             `Factură furnizor (din FGO)\n` +
             `Furnizor: ${it.furnizor ?? '-'}${it.cod_unic_furnizor ? ` (CUI ${it.cod_unic_furnizor})` : ''}\n` +
@@ -308,6 +312,7 @@ export const fgoSource: InvoiceSource = {
           amount: it.valoare_totala ?? null,
           currency: it.valuta ?? 'RON',
           invoiceDate: it.data_emitere ?? null,
+          direction: 'out',
           summary: data ? null : `Factura emisă ${it.serie} ${it.numar} către ${who} – ${it.valoare_totala ?? ''} ${it.valuta ?? ''}\n${link ?? ''}`,
         });
       }

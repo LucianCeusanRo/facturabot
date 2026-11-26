@@ -1,7 +1,7 @@
 {
   "name": "facturabot",
   "productName": "FacturaBot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Colectează automat facturile din Gmail/Outlook/FGO și le trimite contabilei pe WhatsApp sau email.",
   "author": "FacturaBot",
   "license": "MIT",

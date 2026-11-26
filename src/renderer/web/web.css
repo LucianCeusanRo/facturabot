@@ -1,0 +1,54 @@
+/* Panoul de pe telefon – peste styles.css (aceleași variabile și componente). */
+body.web { overflow: auto; -webkit-tap-highlight-color: transparent; font-size: 15px; background: var(--bg); }
+body.web #root { height: auto; min-height: 100%; }
+.m-app { min-height: 100dvh; }
+.m-content { max-width: 720px; margin: 0 auto; padding: calc(16px + env(safe-area-inset-top)) 16px calc(88px + env(safe-area-inset-bottom)); }
+.m-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.m-head h1 { font-size: 26px; }
+.m-head .lead { font-size: 13px; }
+.m-sync { width: 44px; height: 44px; border: 1px solid var(--border); background: var(--panel); border-radius: 12px; }
+.m-tabs {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; justify-content: space-around;
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--bg-2) 92%, transparent);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-top: 1px solid var(--border);
+}
+.m-tabs .nav-item { position: relative; flex: 1; flex-direction: column; height: 52px; gap: 3px; padding: 0; justify-content: center; border-radius: 12px; max-width: 110px; }
+.m-tabs .nav-item.active { background: transparent; color: var(--text); }
+.m-tabs .nav-item.active svg { opacity: 1; }
+.m-tabs .nav-label { font-size: 11px; }
+.m-badge { position: absolute; top: 3px; left: 50%; margin-left: 6px; min-width: 18px; height: 18px; border-radius: 9px; padding: 0 5px; background: var(--accent); color: var(--accent-fg); font: 500 11px/18px var(--mono); text-align: center; }
+.m-filters { margin-bottom: 14px; }
+.m-filters.seg, .m-filters .seg { width: 100%; display: flex; }
+.m-filters button, .m-filters .seg button { flex: 1; height: 34px; padding: 0 6px; white-space: nowrap; }
+.m-list { display: flex; flex-direction: column; }
+.m-inv { padding: 12px 0; border-top: 1px solid var(--rule); display: flex; flex-direction: column; gap: 8px; }
+.m-inv:first-child { border-top: 0; padding-top: 2px; }
+.m-inv:last-child { padding-bottom: 0; }
+.m-inv-top { display: flex; gap: 12px; align-items: center; }
+.m-inv-actions { display: flex; gap: 6px; align-items: center; padding-left: 40px; }
+.m-inv-actions .btn.sm { height: 34px; padding: 0 12px; font-size: 13px; }
+a.btn { text-decoration: none; }
+.m-center { min-height: 100dvh; max-width: 420px; margin: 0 auto; padding: calc(48px + env(safe-area-inset-top)) 24px 32px; display: flex; flex-direction: column; gap: 16px; }
+.m-center h1 { margin-top: 24px; }
+.m-center .brand { padding: 0; }
+.m-form { gap: 12px; }
+input.pin { height: 64px; text-align: center; font-size: 32px; letter-spacing: 0.3em; font-weight: 500; }
+body.web .stats { grid-template-columns: repeat(2, 1fr); margin-bottom: 16px; }
+body.web .stat { padding: 12px 14px; }
+body.web .stat-value { font-size: 26px; }
+body.web .stat .amount.stat-value { font-size: 18px; }
+body.web .stat-text { font-size: 16px; }
+body.web .status-line { flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+body.web .grid2 { grid-template-columns: 1fr; }
+body.web .card { border-radius: 12px; }
+body.web .list-row { flex-wrap: wrap; row-gap: 6px; }
+body.web .list-row .grow { flex-basis: calc(100% - 52px); }
+body.web .rc-row .amount { margin-left: 48px; }
+body.web .rc-total { gap: 20px; }
+body.web .toasts { left: 12px; right: 12px; bottom: calc(80px + env(safe-area-inset-bottom)); }
+body.web .titlebar { display: none; }
+@media (min-width: 720px) {
+  body.web .stats { grid-template-columns: repeat(4, 1fr); }
+  body.web .grid2 { grid-template-columns: 1fr 1fr; }
+}
+::-webkit-scrollbar { width: 0; height: 0; }

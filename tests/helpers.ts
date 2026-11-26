@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { vi } from 'vitest';
 import { SettingsStore } from '../src/main/config';
 import { SecretStore } from '../src/main/secrets';
@@ -46,3 +47,67 @@ export const json = (body: unknown, status = 200, headers: Record<string, string
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
 
 export const b64url = (s: string | Buffer) => Buffer.from(s).toString('base64url');
+
+/** Cititor ZIP minimal pentru teste (director central + inflate). */
+export function readZip(buf: Buffer): Record<string, Buffer> {
+  const eocd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  const count = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  const out: Record<string, Buffer> = {};
+  for (let i = 0; i < count; i++) {
+    const method = buf.readUInt16LE(p + 10);
+    const csize = buf.readUInt32LE(p + 20);
+    const nlen = buf.readUInt16LE(p + 28);
+    const local = buf.readUInt32LE(p + 42);
+    const name = buf.subarray(p + 46, p + 46 + nlen).toString('utf8');
+    const lnlen = buf.readUInt16LE(local + 26);
+    const data = buf.subarray(local + 30 + lnlen, local + 30 + lnlen + csize);
+    out[name] = method === 8 ? zlib.inflateRawSync(data) : Buffer.from(data);
+    p += 46 + nlen;
+  }
+  return out;
+}
+
+import type { InvoiceRecord } from '../src/shared/types';
+
+let invSeq = 0;
+/** InvoiceRecord complet pentru teste de calcul. */
+export function inv(p: Partial<InvoiceRecord> = {}): InvoiceRecord {
+  invSeq++;
+  return {
+    id: invSeq,
+    source: 'gmail',
+    externalId: `e${invSeq}`,
+    fileHash: null,
+    seriesNumber: null,
+    vendor: 'Furnizor',
+    subject: null,
+    fileName: null,
+    filePath: null,
+    amount: 100,
+    currency: 'RON',
+    invoiceDate: '2026-11-10',
+    direction: 'in',
+    platform: null,
+    supplierCountry: null,
+    supplierVatId: null,
+    vatTreatment: 'unknown',
+    dueDate: null,
+    paid: null,
+    amountRon: null,
+    fxRate: null,
+    status: 'sent',
+    channel: null,
+    error: null,
+    attempts: 0,
+    createdAt: '2026-11-10T10:00:00.000Z',
+    sentAt: null,
+    ...p,
+  };
+}
+
+/** XML în formatul BNR (nbrfxrates*.xml). */
+export const bnrXml = (cubes: Record<string, Record<string, string>>) =>
+  `<?xml version="1.0" encoding="utf-8"?><DataSet xmlns="http://www.bnr.ro/xsd"><Body><Subject>Reference rates</Subject><OrigCurrency>RON</OrigCurrency>${Object.entries(cubes)
+    .map(([d, rates]) => `<Cube date="${d}">${Object.entries(rates).map(([c, v]) => (c === 'HUF' ? `<Rate currency="HUF" multiplier="100">${v}</Rate>` : `<Rate currency="${c}">${v}</Rate>`)).join('')}</Cube>`)
+    .join('')}</Body></DataSet>`;

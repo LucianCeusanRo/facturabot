@@ -50,7 +50,7 @@ export async function fetchWithRetry(f: typeof fetch, url: string, init: Request
 /** Eroare: contul trebuie reconectat (token revocat / expirat definitiv). */
 export class AuthExpiredError extends Error {
   constructor(
-    public provider: 'gmail' | 'outlook',
+    public provider: 'gmail' | 'outlook' | 'googleAds' | 'meta' | 'tiktok',
     message: string,
   ) {
     super(message);

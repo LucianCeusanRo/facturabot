@@ -6,6 +6,7 @@ import { Icon } from '../components/Icon';
 import { WhatsAppSetup } from '../components/WhatsAppSetup';
 import { Field, Toggle } from '../components/ui';
 import { AccountantForm, FgoForm } from './Onboarding';
+import { CompanyTax, DirectSources, PhoneAccess, ReportsSettings } from './SettingsExtra';
 
 export function EmailConnect({ store }: { store: Store }) {
   const { settings, status, save, toast, refresh } = store;
@@ -131,7 +132,7 @@ export function SettingsPage({ store }: { store: Store }) {
       <header className="page-head">
         <div>
           <h1>Setări</h1>
-          <p className="lead">Surse, contabilă, trimitere și automatizare.</p>
+          <p className="lead">Surse, contabilă, trimitere, TVA și acces de pe telefon.</p>
         </div>
       </header>
       <div className="settings-sheet">
@@ -145,6 +146,15 @@ export function SettingsPage({ store }: { store: Store }) {
             <div className="sep" />
             <h4 className="sub">FGO (API v2)</h4>
             <FgoForm store={store} />
+          </div>
+        </section>
+        <section className="set-row" id="set-ads">
+          <div className="set-label">
+            <h2>Platforme de reclame</h2>
+            <p>Opțional: facturile Meta, TikTok și Google Ads direct prin API-urile oficiale, pentru conturile cu facturare lunară.</p>
+          </div>
+          <div className="set-panel">
+            <DirectSources store={store} />
           </div>
         </section>
         <section className="set-row">
@@ -195,6 +205,33 @@ export function SettingsPage({ store }: { store: Store }) {
                 ))}
               </select>
             </Field>
+          </div>
+        </section>
+        <section className="set-row" id="set-tax">
+          <div className="set-label">
+            <h2>Firmă și TVA</h2>
+            <p>Regimul de TVA și pragurile folosite în pagina TVA. Valorile au sursa oficială alături și pot fi schimbate dacă legea se modifică.</p>
+          </div>
+          <div className="set-panel">
+            <CompanyTax store={store} />
+          </div>
+        </section>
+        <section className="set-row" id="set-phone">
+          <div className="set-label">
+            <h2>Acces de pe telefon</h2>
+            <p>Vezi facturile, cheltuielile și TVA-ul de pe telefon și aprobă trimiterile. Server local, împerechere cu cod QR.</p>
+          </div>
+          <div className="set-panel">
+            <PhoneAccess store={store} />
+          </div>
+        </section>
+        <section className="set-row">
+          <div className="set-label">
+            <h2>Rapoarte și remindere</h2>
+            <p>Pachetul lunar pentru contabilă, facturi lunare lipsă și scadențe.</p>
+          </div>
+          <div className="set-panel">
+            <ReportsSettings store={store} />
           </div>
         </section>
         <section className="set-row">

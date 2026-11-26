@@ -9,8 +9,15 @@ import type { WhatsAppWeb } from './delivery/whatsappWeb.js';
 import type { SecretStore } from './secrets.js';
 import { AuthExpiredError, type RetryOptions } from './http.js';
 import { SOURCES } from './sources/registry.js';
-import { sanitizeFileName } from './sources/classify.js';
+import { extractPdfText, sanitizeFileName } from './sources/classify.js';
 import type { FoundDocument, InvoiceSource } from './sources/types.js';
+import { platformOf } from './analytics.js';
+import { sendEmail } from './delivery/email.js';
+import { buildAccountantPackage, isMonth, previousMonth } from './export/package.js';
+import { monthLabel } from './export/report.js';
+import type { Finance } from './finance.js';
+import { parseReceipt } from './parsers/amounts.js';
+import { classifyVat } from './tax/vat.js';
 
 export interface EngineDeps {
   db: Db;
@@ -25,6 +32,8 @@ export interface EngineDeps {
   fetch?: typeof fetch;
   retry?: RetryOptions;
   sleep?: (ms: number) => Promise<void>;
+  finance?: Finance;
+  now?: () => Date;
 }
 
 const escapeHtml = (s: string) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
@@ -106,6 +115,7 @@ export class SyncEngine {
       }
       if (found) this.log('info', `Am găsit ${found} documente noi`);
       await this.processQueue();
+      await this.afterSync();
       this.lastSync = new Date();
       this.d.db.setKv('lastSync', this.lastSync.toISOString());
     } finally {
@@ -130,6 +140,25 @@ export class SyncEngine {
         fileName = sanitizeFileName(`${doc.externalId}.txt`);
       }
     }
+    // Îmbogățire pe reguli: sumă (dacă sursa n-a dat-o), platformă, tratament TVA.
+    let text = doc.text ?? null;
+    if (!text && data && (doc.mimeType ?? fileName ?? '').toLowerCase().includes('pdf')) text = extractPdfText(data);
+    let amount = doc.amount ?? null;
+    let currency = doc.currency ?? null;
+    if (amount == null && (text || doc.summary)) {
+      const f = parseReceipt({ from: doc.vendor ?? '', subject: doc.subject ?? '', text: `${text ?? ''}\n${doc.summary ?? ''}` });
+      amount = f.amount;
+      currency = f.currency;
+    }
+    const vat = classifyVat({
+      vendor: doc.vendor,
+      text: `${text ?? ''}\n${doc.summary ?? ''}`,
+      supplierCountry: doc.supplierCountry,
+      supplierVatId: doc.supplierVatId,
+      direction: doc.direction ?? 'in',
+      ownCountry: settings.company.country,
+      ownIds: [settings.sources.fgo.codUnic ?? ''].filter(Boolean),
+    });
     const fileHash = data ? crypto.createHash('sha256').update(data).digest('hex') : null;
     const dup = this.d.db.findDuplicate({ source: sourceId, externalId: doc.externalId, fileHash, seriesNumber: doc.seriesNumber, vendor: doc.vendor });
     if (dup) {
@@ -156,9 +185,16 @@ export class SyncEngine {
       subject: doc.subject,
       fileName,
       filePath,
-      amount: doc.amount,
-      currency: doc.currency,
+      amount,
+      currency: amount != null ? (currency ?? 'RON') : currency,
       invoiceDate: doc.invoiceDate,
+      direction: doc.direction ?? 'in',
+      platform: doc.platform ?? platformOf({ platform: null, vendor: doc.vendor ?? null, source: sourceId }),
+      supplierCountry: vat.supplierCountry,
+      supplierVatId: vat.supplierVatId,
+      vatTreatment: vat.treatment,
+      dueDate: doc.dueDate ?? null,
+      paid: doc.paid ?? null,
       status: settings.confirmBeforeSend ? 'awaiting_confirm' : 'pending',
     });
     if (settings.confirmBeforeSend) this.d.notify?.('Factură nouă de confirmat', describe(doc));
@@ -227,6 +263,72 @@ export class SyncEngine {
     if (sent) this.d.notify?.('FacturaBot', `${sent} ${sent === 1 ? 'factură trimisă' : 'facturi trimise'} la contabilă`);
   }
 
+  /** După fiecare sincronizare: curs BNR, venituri FGO, alerte, raport lunar. Erorile nu opresc trimiterea. */
+  async afterSync() {
+    const f = this.d.finance;
+    if (!f) return;
+    await f.convertPending().catch((e) => this.log('warn', `Curs BNR indisponibil: ${(e as Error).message}`));
+    await f.refreshRevenue().catch((e) => this.log('warn', `Venituri FGO: ${(e as Error).message}`));
+    try {
+      f.checkAlerts();
+    } catch {
+      /* alertele nu sunt critice */
+    }
+    const s = this.d.settings.get();
+    const now = (this.d.now ?? (() => new Date()))();
+    if (s.reports.monthlyEnabled && now.getDate() >= s.reports.dayOfMonth) {
+      const month = previousMonth(now);
+      if (!this.d.db.getKv(`report:${month}`)) {
+        try {
+          const r = await this.sendMonthlyPackage(month);
+          this.d.db.setKv(`report:${month}`, now.toISOString());
+          this.log('success', `Raportul lunar ${monthLabel(month)} a fost trimis (${r.sentVia}).`);
+        } catch (e) {
+          this.log('error', `Raportul lunar ${month}: ${(e as Error).message}`);
+        }
+      }
+    }
+  }
+
+  /** Construiește „pachetul pentru contabil” și trimite raportul PDF (+ ZIP pe email, dacă e configurat). */
+  async sendMonthlyPackage(month: string, send = true): Promise<{ zipPath: string; sentVia: string }> {
+    if (!this.d.finance) throw new Error('Modulul financiar nu e disponibil');
+    if (!isMonth(month)) throw new Error('Lună invalidă');
+    const settings = this.d.settings.get();
+    const pkg = await buildAccountantPackage({ db: this.d.db, finance: this.d.finance, settings, dataDir: this.d.dataDir, month, htmlToPdf: this.d.htmlToPdf });
+    if (!send) return { zipPath: pkg.zipPath, sentVia: 'local' };
+    const label = `Raport lunar ${monthLabel(month)} (${pkg.count} facturi)`;
+    const via: string[] = [];
+    if (pkg.reportPdf) {
+      const r = await deliver(
+        { data: pkg.reportPdf, fileName: pkg.reportName, mimeType: 'application/pdf', description: label },
+        { settings, secrets: this.d.secrets, waWeb: this.d.waWeb, log: (l, m) => this.log(l, m), fetch: this.d.fetch },
+      );
+      via.push(labelChannel(r.channel));
+    }
+    const zip = fs.readFileSync(pkg.zipPath);
+    if (settings.accountant.email && zip.length <= 20 * 1024 * 1024) {
+      try {
+        await sendEmail(
+          settings,
+          this.d.secrets,
+          {
+            to: settings.accountant.email,
+            subject: `[FacturaBot] Pachet ${monthLabel(month)}`,
+            text: `Bună ziua${settings.accountant.name ? ' ' + settings.accountant.name : ''},\n\nAtașat găsiți pachetul pentru ${monthLabel(month)}: toate facturile, raportul PDF și tabelul (CSV + Excel).\n\nMesaj trimis automat de FacturaBot.`,
+            attachment: { fileName: path.basename(pkg.zipPath), data: zip, mimeType: 'application/zip' },
+          },
+          this.d.fetch,
+        );
+        via.push('email (ZIP)');
+      } catch (e) {
+        this.log('warn', `Pachetul ZIP nu a plecat pe email: ${(e as Error).message}`);
+      }
+    }
+    if (!via.length) throw new Error('Nu am putut trimite raportul pe niciun canal');
+    return { zipPath: pkg.zipPath, sentVia: via.join(' + ') };
+  }
+
   async approve(id: number) {
     this.d.db.resetAttempts(id);
     this.d.db.setStatus(id, 'pending');
@@ -245,6 +347,9 @@ export class SyncEngine {
         gmail: sec.has('google.tokens'),
         outlook: sec.has('microsoft.tokens'),
         fgo: !!s.sources.fgo.codUnic && sec.has('fgo.apiKey'),
+        meta: s.sources.meta.enabled && !!s.sources.meta.businessId && sec.has('meta.token'),
+        tiktok: s.sources.tiktok.enabled && !!s.sources.tiktok.bcId && sec.has('tiktok.token'),
+        googleAds: s.sources.googleAds.enabled && !!s.sources.googleAds.customerId && sec.has('googleAds.tokens') && sec.has('googleAds.developerToken'),
         whatsappWeb: waStatus,
         whatsappCloud: !!s.delivery.cloud.phoneNumberId && sec.has('whatsapp.cloudToken'),
         smtp: !!s.delivery.smtp.host && sec.has('smtp.password'),

@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react';
-import type { InvoiceRecord } from '../../shared/types';
+import type { Insight, InvoiceRecord } from '../../shared/types';
 import { api, fmtDate, fmtMoney, relTime } from '../api';
 import type { Page, Store } from '../App';
 import { Icon } from '../components/Icon';
 import { Card, ChannelBadge, Dot, SourceLogo, StatusPill } from '../components/ui';
+import { InsightsList } from '../views/Insights';
 
 export function Dashboard({ store, go }: { store: Store; go: (p: Page) => void }) {
   const { status, settings, wa } = store;
   const [recent, setRecent] = useState<InvoiceRecord[]>([]);
   const [waiting, setWaiting] = useState<InvoiceRecord[]>([]);
+  const [insights, setInsights] = useState<Insight[]>([]);
 
   useEffect(() => {
+    api.insights().then(setInsights);
     api.listInvoices({ limit: 8 }).then(setRecent);
     api.listInvoices({ status: 'awaiting_confirm', limit: 20 }).then(setWaiting);
   }, [status]);
@@ -18,7 +21,7 @@ export function Dashboard({ store, go }: { store: Store; go: (p: Page) => void }
   const c = status?.connections;
   const mode = settings.delivery.whatsappMode;
   const waOk = mode === 'web' ? c?.whatsappWeb === 'connected' : mode === 'cloud' ? !!c?.whatsappCloud : true;
-  const anySource = !!(c?.gmail || c?.outlook || c?.fgo);
+  const anySource = !!(c?.gmail || c?.outlook || c?.fgo || c?.meta || c?.tiktok || c?.googleAds);
   const problems = status?.problems ?? [];
   const healthy = anySource && problems.length === 0 && (waOk || (settings.delivery.emailFallback && !!settings.accountant.email));
   const who = settings.accountant.name || 'contabilă';
@@ -85,6 +88,9 @@ export function Dashboard({ store, go }: { store: Store; go: (p: Page) => void }
               <Conn label="Gmail" sub={settings.sources.gmail.account} ok={!!c?.gmail} />
               <Conn label="Outlook" sub={settings.sources.outlook.account} ok={!!c?.outlook} optional />
               <Conn label="FGO" sub={settings.sources.fgo.codUnic ? `CUI ${settings.sources.fgo.codUnic}` : undefined} ok={!!c?.fgo} optional />
+              {settings.sources.meta.enabled && <Conn label="Meta Ads" sub={settings.sources.meta.businessId ? `Business ${settings.sources.meta.businessId}` : undefined} ok={!!c?.meta} optional />}
+              {settings.sources.tiktok.enabled && <Conn label="TikTok Ads" sub={settings.sources.tiktok.bcId ? `BC ${settings.sources.tiktok.bcId}` : undefined} ok={!!c?.tiktok} optional />}
+              {settings.sources.googleAds.enabled && <Conn label="Google Ads" sub={settings.sources.googleAds.customerId ? `Cont ${settings.sources.googleAds.customerId}` : undefined} ok={!!c?.googleAds} optional />}
               {mode === 'web' && (
                 <Conn
                   label="WhatsApp Web"
@@ -113,6 +119,11 @@ export function Dashboard({ store, go }: { store: Store; go: (p: Page) => void }
         </div>
 
         <div className="stack">
+          {insights.length > 0 && (
+            <Card title="De urmărit" icon="calendar" actions={<button className="link-btn" onClick={() => go('tax')}>TVA <Icon name="arrow" size={14} /></button>}>
+              <InsightsList items={insights.slice(0, 5)} />
+            </Card>
+          )}
           {waiting.length > 0 && (
             <Card title={`Așteaptă confirmarea ta (${waiting.length})`} className="attention">
               <div className="list">
@@ -157,7 +168,7 @@ export function Dashboard({ store, go }: { store: Store; go: (p: Page) => void }
                       </div>
                     </div>
                     <div className={`amount ${i.amount == null ? 'zero' : ''}`}>{fmtMoney(i.amount, i.currency)}</div>
-                    <ChannelBadge c={i.channel} />
+                    <span className="hide-sm"><ChannelBadge c={i.channel} /></span>
                     <StatusPill s={i.status} />
                   </div>
                 ))}
