@@ -27,7 +27,7 @@ Urmează integrarea cu ANAF e-Factura și cu facturile direct din platformele de
 Dacă ai un magazin online, un mic business sau ești contabil(ă) și vrei să-l încerci, scrie-mi un mesaj sau un comentariu. Caut primii 10 testeri. 🙌
 
 👉 Codul: https://github.com/LucianCeusanRo/facturabot
-👉 Instalator Windows (v0.1.0): https://github.com/LucianCeusanRo/facturabot/releases/download/v0.1.0/FacturaBot-Setup-0.1.0.exe
+👉 Instalator Windows (v0.2.0): https://github.com/LucianCeusanRo/facturabot/releases/download/v0.2.0/FacturaBot-Setup-0.2.0.exe
 
 (Instalatorul nu este semnat, deci SmartScreen poate afișa un avertisment. Nu a fost testat încă pe conturi reale.)
 
@@ -56,7 +56,7 @@ Next up: Romania's ANAF e-Factura and invoices pulled straight from the ad platf
 If you run a small business or you're an accountant and want to try it, drop a comment or DM me. I'm looking for the first 10 testers. 🙌
 
 👉 Code: https://github.com/LucianCeusanRo/facturabot
-👉 Windows installer (v0.1.0): https://github.com/LucianCeusanRo/facturabot/releases/download/v0.1.0/FacturaBot-Setup-0.1.0.exe
+👉 Windows installer (v0.2.0): https://github.com/LucianCeusanRo/facturabot/releases/download/v0.2.0/FacturaBot-Setup-0.2.0.exe
 
 (The installer is unsigned, so SmartScreen may warn. It has not been tested on real accounts yet.)
 
